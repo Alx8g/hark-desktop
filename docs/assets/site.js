@@ -1,34 +1,21 @@
-// Progressive enhancement only: the page works without this script.
-// 1. Find the repository from the GitHub Pages address, so the links need no hard-coded owner.
-// 2. Highlight the visitor's system and label the main button.
+// Progressive enhancement only: the page is complete without this script.
+// 1. Name the repository once, so every GitHub link points at it.
+// 2. Highlight the visitor's system and label the main buttons.
 // 3. Point each download button at the right file from the latest release, when GitHub answers.
-// No analytics, no cookies, no third-party scripts. The one request is to GitHub's public API,
-// the same company that serves this page.
+// 4. Fade sections in as they scroll into view, and flatten the hero window as you scroll.
+// No analytics, no cookies, no third-party scripts. The one request is to GitHub's public API.
 (function () {
   "use strict";
 
+  document.documentElement.classList.add("js");
+
   // The site is served from more than one address (a custom domain and the Pages preview address), so
   // the repository is named here rather than guessed from the address bar.
-  var REPO_OVERRIDE = "https://github.com/Alx8g/hark-desktop";
+  var REPO = "https://github.com/Alx8g/hark-desktop";
 
-  function repoUrl() {
-    if (REPO_OVERRIDE) return REPO_OVERRIDE.replace(/\/$/, "");
-    var m = location.hostname.match(/^([^.]+)\.github\.io$/);
-    var name = location.pathname.split("/")[1];
-    return m && name ? "https://github.com/" + m[1] + "/" + name : "";
-  }
-
-  var repo = repoUrl();
   var links = document.querySelectorAll("[data-repo], [data-repo-path]");
   for (var i = 0; i < links.length; i++) {
-    var a = links[i];
-    if (!repo) {
-      // Opened from disk or a custom domain without an override: leave links inert rather than wrong.
-      a.removeAttribute("href");
-      a.setAttribute("aria-disabled", "true");
-      continue;
-    }
-    a.setAttribute("href", repo + (a.getAttribute("data-repo-path") || ""));
+    links[i].setAttribute("href", REPO + (links[i].getAttribute("data-repo-path") || ""));
   }
 
   function detect() {
@@ -43,15 +30,15 @@
 
   var NAMES = { windows: "Windows", macos: "macOS", linux: "Linux" };
   var os = detect();
-  var main = document.getElementById("cta-main");
+  var mains = [document.getElementById("cta-main"), document.getElementById("cta-bottom")];
 
-  if (NAMES[os]) {
-    main.textContent = "Download for " + NAMES[os];
-    var card = document.querySelector('.dl [data-os="' + os + '"]');
-    if (card) card.setAttribute("data-current", "");
-  } else if (os === "mobile") {
-    main.textContent = "Get it on your computer";
-  }
+  mains.forEach(function (b) {
+    if (!b) return;
+    if (NAMES[os]) b.textContent = "Download for " + NAMES[os];
+    else if (os === "mobile") b.textContent = "Get it on your computer";
+  });
+  var card = NAMES[os] && document.querySelector('.os[data-os="' + os + '"]');
+  if (card) card.setAttribute("data-current", "");
 
   // Match release files by extension. First match per system wins.
   var PATTERNS = {
@@ -60,8 +47,7 @@
     linux: [/\.appimage$/i, /\.deb$/i, /\.rpm$/i],
   };
 
-  if (!repo) return;
-  fetch(repo.replace("https://github.com/", "https://api.github.com/repos/") + "/releases/latest", {
+  fetch(REPO.replace("https://github.com/", "https://api.github.com/repos/") + "/releases/latest", {
     headers: { Accept: "application/vnd.github+json" },
   })
     .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
@@ -73,11 +59,46 @@
           hit = assets.filter(function (a) { return re.test(a.name); })[0] || null;
           return hit;
         });
+        if (!hit) return;
         var btn = document.querySelector('[data-dl="' + key + '"]');
-        if (hit && btn) btn.setAttribute("href", hit.browser_download_url);
-        if (hit && key === os) main.setAttribute("href", hit.browser_download_url);
+        if (btn) btn.setAttribute("href", hit.browser_download_url);
+        if (key === os) mains.forEach(function (b) { if (b) b.setAttribute("href", hit.browser_download_url); });
       });
     })
-    .catch(function () { /* keep the releases page link */ });
+    .catch(function () { /* no release yet: the buttons keep their link to the releases page */ });
 
+  // ---------- motion ----------
+  var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var items = document.querySelectorAll("[data-reveal]");
+
+  if (still || !("IntersectionObserver" in window)) {
+    for (var j = 0; j < items.length; j++) items[j].classList.add("in");
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        e.target.classList.add("in");
+        io.unobserve(e.target);
+      });
+    }, { threshold: 0.12, rootMargin: "0px 0px -6% 0px" });
+    for (var k = 0; k < items.length; k++) io.observe(items[k]);
+  }
+
+  // The hero window starts tilted back and settles flat as the page scrolls (--p goes from 0 to 1).
+  var stage = document.getElementById("stage");
+  if (stage && !still) {
+    var queued = false;
+    var update = function () {
+      queued = false;
+      var top = stage.getBoundingClientRect().top;
+      var vh = window.innerHeight || 800;
+      var p = 1 - Math.min(Math.max((top - vh * 0.05) / (vh * 0.8), 0), 1);
+      stage.style.setProperty("--p", p.toFixed(3));
+    };
+    window.addEventListener("scroll", function () {
+      if (!queued) { queued = true; window.requestAnimationFrame(update); }
+    }, { passive: true });
+    window.addEventListener("resize", update);
+    update();
+  }
 })();
