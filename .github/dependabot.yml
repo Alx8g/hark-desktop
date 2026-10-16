@@ -1,20 +1,37 @@
+# One quiet pull request a month per area, never a major version jump.
+# Major upgrades (Tauri, Vite, the release action) change how the app is built, so they are done on purpose, by hand.
 version: 2
 updates:
-  - package-ecosystem: cargo
-    directory: /src-tauri
-    schedule:
-      interval: weekly
-    groups:
-      tauri:
-        patterns: ["tauri*"]
-  - package-ecosystem: npm
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      tauri:
-        patterns: ["@tauri-apps/*"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      actions:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "tauri-apps/tauri-action"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      rust:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      javascript:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
