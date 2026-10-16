@@ -14,7 +14,7 @@ Download the build for your system from the [latest release](../../releases/late
 
 | System | File | Notes |
 | --- | --- | --- |
-| Windows 10 and 11 | `Hark_<version>_x64-setup.exe` | Per-user install, no admin rights needed. Also available as `.msi`. |
+| Windows 10 and 11 | `Hark_<version>_x64-setup.exe` | Per-user install, no admin rights needed. Tested on Windows 11; Windows 10 needs the WebView2 runtime, which the installer fetches if it is missing. The `.msi` installs for all users and needs admin rights. |
 | macOS 11 or newer | `.dmg` (Apple silicon or Intel) | Not signed. Open it with a right click, then Open, the first time. |
 | Linux | `.deb` or `.rpm` (about 3 MB), or `.AppImage` (about 78 MB) | The deb and rpm use your system's WebKitGTK 4.1. The AppImage carries its own, which is why it is larger. A tray icon needs AppIndicator support. |
 
