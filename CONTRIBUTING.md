@@ -32,7 +32,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org) for commit messa
 | `src/`, `*.html` | The local pages (splash, settings, quick ask, offline), built with Vite |
 | `src-tauri/windows/` | Windows installer wording and art |
 | `branding/` | Brand sources. `node branding/build.mjs` renders the installer art and the social banner |
-| `docs/` | The project website, published with GitHub Pages |
+| `docs/` | The project website at harkdesk.top. Cloudflare Pages publishes this folder on every push to `main`; there is no build step. `_headers` and `_redirects` configure it. |
 
 ## Rules that save you a day
 

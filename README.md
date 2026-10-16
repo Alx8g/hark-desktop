@@ -2,7 +2,7 @@
 
 An unofficial, lightweight desktop app for [Hark](https://hark.com). It is the real Hark in a small native window, with a tray icon, native notifications and a global shortcut, for Windows, macOS and Linux.
 
-Website: [alx8g.github.io/hark-desktop](https://alx8g.github.io/hark-desktop/)
+Website: [harkdesk.top](https://harkdesk.top/)
 
 Not affiliated with Hark. Your account, data and subscription stay on hark.com. The app never sees your password: you sign in on Hark's own pages, exactly as in a browser.
 
