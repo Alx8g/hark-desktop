@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hark</title>
+    <link rel="stylesheet" href="/src/shell.css" />
+    <style>
+      body { display: grid; place-items: center; }
+      .splash { text-align: center; padding: 36px 44px 30px; width: 340px; }
+      .status { margin-top: 10px; font-size: 13.5px; color: var(--ink-50); min-height: 18px; }
+      .bar { margin: 22px auto 4px; width: 180px; height: 4px; border-radius: 999px; background: rgba(29,29,31,.1); overflow: hidden; }
+      .bar i { display: block; height: 100%; width: 38%; border-radius: 999px; background: var(--ink); animation: slide 1.15s var(--ease) infinite; }
+      @keyframes slide { 0% { transform: translateX(-110%);} 100% { transform: translateX(300%);} }
+    </style>
+  </head>
+  <body>
+    <main class="card splash drag" data-tauri-drag-region>
+      <div class="wordmark">hark <em>pro</em></div>
+      <p class="status" id="status">Getting your brief ready…</p>
+      <div class="bar" aria-hidden="true"><i></i></div>
+    </main>
+    <script type="module" src="/src/splash.ts"></script>
+  </body>
+</html>

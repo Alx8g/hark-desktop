@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- Social preview banner for the repository and the website. Rendered at 1280x640. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="brand.css" />
+    <style>
+      html, body { width: 1280px; height: 640px; overflow: hidden; }
+      body { position: relative; font-family: var(--font); }
+      .brand { position: absolute; left: 88px; top: 76px; display: flex; align-items: center; gap: 22px; }
+      .brand .tile { --s: 84px; }
+      .brand .wordmark { font-size: 54px; }
+      .brand small { font-size: 17px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-50); font-weight: 600; padding-top: 10px; }
+      h1 { position: absolute; left: 88px; top: 238px; font-family: var(--serif); font-weight: 400; font-size: 104px; letter-spacing: -0.035em; line-height: 1.02; color: var(--ink); }
+      h1 em { font-style: italic; color: rgba(29, 29, 31, 0.55); }
+      p { position: absolute; left: 90px; top: 478px; font-size: 30px; color: var(--ink-70); }
+      .pill { position: absolute; right: 88px; bottom: 76px; padding: 14px 26px; font-size: 22px; font-weight: 550; }
+    </style>
+  </head>
+  <body class="sky">
+    <div class="brand">
+      <div class="tile"></div>
+      <div class="wordmark">hark <em>pro</em></div>
+      <small>Desktop</small>
+    </div>
+    <h1>Hark, in its<br /><em>own window.</em></h1>
+    <p>An unofficial desktop app for Windows, macOS and Linux.</p>
+    <div class="pill">Free and open source</div>
+  </body>
+</html>

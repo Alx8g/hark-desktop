@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in Hark Desktop does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Problems with hark.com itself (chat answers, billing, your account) belong with Hark. This tracker is for the desktop app: the window, tray, notifications, shortcuts and installer.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Shown at the bottom of Desktop settings.
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: desktop
+    attributes:
+      label: System details
+      description: macOS version, or Linux distribution and desktop environment (for example Fedora 41, KDE Plasma 6). Leave empty on Windows.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. A screenshot helps.
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Whether it happens every time, and whether it started after an update.

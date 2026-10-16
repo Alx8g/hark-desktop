@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem
+    url: https://github.com/security/advisories/new
+    about: Report vulnerabilities privately. Open the Security tab of this repository if this link does not open the right one.
+  - name: Problem with hark.com itself
+    url: https://hark.com
+    about: Chat answers, billing and your account are handled by Hark, not this app.

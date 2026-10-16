@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ask Hark</title>
+    <link rel="stylesheet" href="/src/shell.css" />
+    <style>
+      body { background: transparent; display: grid; place-items: start center; padding: 10px; }
+      .dock { width: 100%; padding: 14px 16px 12px; border-radius: 26px; background: var(--thin); backdrop-filter: blur(22px) saturate(1.4); box-shadow: 0 16px 48px rgba(29,29,31,.22), inset 0 0 0 1px rgba(245,245,247,.5); }
+      textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; font: inherit; font-size: 16px; line-height: 1.45; color: var(--ink); min-height: 48px; }
+      textarea::placeholder { color: var(--ink-50); }
+      .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+      .hint { font-size: 12px; color: var(--ink-50); }
+      /* Linux can't be relied on for a transparent window: the dock fills it instead. */
+      html[data-platform="linux"] body { padding: 0; }
+      html[data-platform="linux"] .dock { height: 100%; border-radius: 0; box-shadow: none; }
+      .send { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--ink); color: #fff; font-size: 16px; cursor: pointer; display: grid; place-items: center; }
+    </style>
+  </head>
+  <body>
+    <main class="dock drag" data-tauri-drag-region>
+      <textarea id="input" class="no-drag" placeholder="Ask Hark anything…" rows="2" aria-label="Ask Hark anything"></textarea>
+      <div class="foot">
+        <span class="hint">Enter opens Hark with this drafted · Esc dismisses</span>
+        <button class="send no-drag" id="send" aria-label="Open in Hark">↑</button>
+      </div>
+    </main>
+    <script type="module" src="/src/quick.ts"></script>
+  </body>
+</html>

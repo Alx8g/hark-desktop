@@ -1,0 +1,14 @@
+<!doctype html>
+<!-- Windows and Linux tray icon, 64x64. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="brand.css" />
+    <style>
+      html, body { margin: 0; width: 64px; height: 64px; background: transparent; overflow: hidden; }
+      .tile { --s: 64px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
+      .tile::after { inset: 11%; filter: none; }
+    </style>
+  </head>
+  <body><div class="tile"></div></body>
+</html>

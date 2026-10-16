@@ -1,0 +1,14 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# local scratch and probe output
+.working/
+.probe/
+installers/
+*.log
+*.db
+
+.DS_Store
+Thumbs.db

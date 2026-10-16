@@ -1,0 +1,33 @@
+{
+  "name": "hark-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A lightweight, unofficial desktop client for Hark (hark.com)",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-autostart": "^2",
+    "@tauri-apps/plugin-notification": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-store": "^2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

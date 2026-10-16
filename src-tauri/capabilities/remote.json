@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-hark",
+  "description": "hark.com pages inside the main window may only emit/listen to Tauri events. Every native action (toasts, opening links, window controls, progress) is validated and performed by Rust.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["https://hark.com/*", "https://*.hark.com/*"]
+  },
+  "permissions": [
+    "core:event:allow-emit",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

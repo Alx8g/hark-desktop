@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Local shell pages (splash, settings, offline, quick capture, and the offline page shown inside the main window). Applies to local app URLs only.",
+  "windows": ["main", "splash", "settings", "offline", "quick"],
+  "permissions": [
+    "core:event:allow-emit",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-close",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-start-dragging",
+    "core:app:allow-version",
+    "opener:allow-open-url"
+  ]
+}
