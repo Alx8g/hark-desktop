@@ -1,9 +1,12 @@
 name: Release
 
 # Push a tag such as v0.2.0 to build every platform and attach the packages to a draft release.
+# Run it by hand (Actions tab, Run workflow) for a dry run: it builds everything and keeps the
+# packages as run artifacts, without creating a tag or a release.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -49,7 +52,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tauriScript: pnpm tauri
-          tagName: ${{ github.ref_name }}
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          uploadWorkflowArtifacts: true
           releaseName: Hark Desktop ${{ github.ref_name }}
           releaseBody: |
             Download the file for your system below. These builds are not code-signed:
