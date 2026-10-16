@@ -1,0 +1,6 @@
+# Short links (read by Cloudflare Pages). Direct per-system file links need version-less release file names.
+/download   https://github.com/Alx8g/hark-desktop/releases/latest      302
+/releases   https://github.com/Alx8g/hark-desktop/releases             302
+/source     https://github.com/Alx8g/hark-desktop                      302
+/issues     https://github.com/Alx8g/hark-desktop/issues               302
+/security   https://github.com/Alx8g/hark-desktop/security/policy       302

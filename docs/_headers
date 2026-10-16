@@ -1,0 +1,8 @@
+# Security headers for the website (read by Cloudflare Pages).
+# The page loads only its own scripts, styles and images. The one outside request is the browser
+# asking GitHub's public API for the latest release, so the download buttons can link to the right file.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()

@@ -7,8 +7,9 @@
 (function () {
   "use strict";
 
-  // Using a custom domain? Put the repository address here, for example "https://github.com/owner/repo".
-  var REPO_OVERRIDE = "";
+  // The site is served from more than one address (a custom domain and the Pages preview address), so
+  // the repository is named here rather than guessed from the address bar.
+  var REPO_OVERRIDE = "https://github.com/Alx8g/hark-desktop";
 
   function repoUrl() {
     if (REPO_OVERRIDE) return REPO_OVERRIDE.replace(/\/$/, "");
