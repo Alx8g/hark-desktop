@@ -6,3 +6,14 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
+
+# The page, stylesheet and script change with every deploy, so browsers must check before reusing them.
+# (Cloudflare otherwise lets browsers keep static files for 4 hours, which shows a new page with an old stylesheet.)
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/assets/site.css
+  Cache-Control: no-cache
+/assets/site.js
+  Cache-Control: no-cache
