@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "quick",
+  "description": "Quick ask (Ctrl+Shift+H). Local page only; it gets just what it uses.",
+  "windows": [
+    "quick"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-quick-compose",
+    "core:window:allow-hide",
+    "core:window:allow-set-size",
+    "core:window:allow-start-dragging"
+  ]
+}

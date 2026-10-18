@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-sign-in",
+  "description": "The sign-in and payment pages Hark sends you to may only emit events, so the window controls drawn on them work. Rust validates every event.",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "https://accounts.google.com/*",
+      "https://appleid.apple.com/*",
+      "https://checkout.stripe.com/*",
+      "https://billing.stripe.com/*"
+    ]
+  },
+  "permissions": [
+    "core:event:allow-emit"
+  ]
+}

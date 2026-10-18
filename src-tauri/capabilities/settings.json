@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "Desktop settings. Local page only; it gets just what it uses.",
+  "windows": [
+    "settings"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-get-settings",
+    "allow-set-setting",
+    "allow-test-notification",
+    "allow-reload-main",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:app:allow-version",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://hark.com/*"
+        }
+      ]
+    }
+  ]
+}
