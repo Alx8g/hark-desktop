@@ -274,6 +274,36 @@
      * <body> instead, keeping <html> (and so the rounded clip) fixed to the window. */
     var height = root.hasAttribute("data-scrolls") ? body.scrollHeight : root.scrollHeight;
     root.toggleAttribute("data-scrolls", isWindows() && !login && height > window.innerHeight + 1);
+    clearCorner();
+  }
+
+  /* Hark puts some controls in the top-right corner, where the window
+   * controls sit on Windows: Share on a page Hark built, Close on its
+   * settings, and whatever it adds next. Any control found under the pill
+   * slides left (data-hark-clear), as Search and Settings always do. */
+  var CONTROL = "button, a[href], [role=button], input";
+  function clearCorner() {
+    var cap = document.getElementById("hark-caption");
+    if (!cap || !isWindows()) return;
+    var c = cap.getBoundingClientRect();
+    if (!c.width) return;
+    var y = c.top + c.height / 2;
+    [c.left + 6, c.left + c.width / 2, c.right - 6].forEach(function (x) {
+      /* Only what lies directly under the pill: anything deeper is covered by Hark anyway. */
+      var stack = document.elementsFromPoint(x, y);
+      for (var i = 0; i < stack.length; i++) {
+        if (cap.contains(stack[i])) continue;
+        var el = stack[i].closest(CONTROL);
+        if (el && el.getBoundingClientRect().width <= 220) el.setAttribute("data-hark-clear", "");
+        break;
+      }
+    });
+    /* One that has moved away from the corner (a wider window, a new layout) goes back. */
+    document.querySelectorAll("[data-hark-clear]").forEach(function (el) {
+      var b = el.getBoundingClientRect();
+      var home = { left: b.left + 140, right: b.right + 140 };
+      if (!b.width || home.left >= c.right || home.right <= c.left - 8 || b.top >= c.bottom || b.bottom <= c.top) el.removeAttribute("data-hark-clear");
+    });
   }
 
   var pageSyncQueued = false;
@@ -329,6 +359,7 @@
       css.push(
         "@media (min-width:760px){",
         'button[aria-label="Settings"],button[aria-label="Search the page and your mail"]{translate:-140px 0}',
+        "[data-hark-clear]{translate:-140px 0!important}",
         "}",
         "#hark-caption{position:fixed;top:14px;right:16px;z-index:2147483646;display:flex;gap:2px;padding:4px;border-radius:9999px;background:var(--thin-bg,rgba(255,255,255,.55));backdrop-filter:blur(16px) saturate(1.4);-webkit-backdrop-filter:blur(16px) saturate(1.4);box-shadow:inset 0 0 0 1px var(--stroke-secondary,rgba(29,29,31,.08)),0 4px 18px rgba(0,0,0,.08);font-family:'GT Standard L','Segoe UI Variable Text','Segoe UI',sans-serif}",
         "#hark-caption button{appearance:none;border:0;background:transparent;width:40px;height:40px;border-radius:9999px;display:grid;place-items:center;color:var(--text-primary,#1d1d1f);cursor:pointer;padding:0}",
@@ -943,9 +974,11 @@
       else if (target === "projects") clickAria("Projects");
       else if (target === "search") clickAria("Search the page and your mail");
       else if (target === "home") {
-        var list = document.querySelector('[data-testid="message-list"]');
-        if (list) list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
-        focusComposer();
+        /* Hark's Home panel, your cards beside the chat; it opens from the chat. */
+        if (document.querySelector('button[aria-label="Collapse Home"]')) return;
+        if (clickAria("Expand Home")) return;
+        if (!clickAria("Chat")) { location.assign("/chat"); return; }
+        setTimeout(function () { clickAria("Expand Home"); }, 800);
       }
     });
   }

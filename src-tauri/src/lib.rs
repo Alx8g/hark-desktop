@@ -1932,6 +1932,12 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
         }
     })
     .on_new_window(move |url: Url, _features| {
+        trace(&format!(
+            "new window {}://{} in_app={}",
+            url.scheme(),
+            url.host_str().unwrap_or(""),
+            in_app_page(&url)
+        ));
         if in_app_page(&url) {
             // Auth redirects (Google / Apple) complete in-place.
             if let Some(main) = new_win_app.get_webview_window("main") {
@@ -2171,7 +2177,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let quick = MenuItem::with_id(app, "quick", "Ask Hark…", true, Some(quick_label()))?;
     let plan = MenuItem::with_id(app, "plan", "Plan", true, None::<&str>)?;
     let plan_gap = PredefinedMenuItem::separator(app)?;
-    let brief = MenuItem::with_id(app, "brief", "Today's brief", true, None::<&str>)?;
+    let home = MenuItem::with_id(app, "home", "Home", true, None::<&str>)?;
     let projects = MenuItem::with_id(app, "projects", "Projects", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some(settings_label()))?;
     let browser = MenuItem::with_id(
@@ -2189,7 +2195,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             &open,
             &quick,
             &PredefinedMenuItem::separator(app)?,
-            &brief,
+            &home,
             &projects,
             &PredefinedMenuItem::separator(app)?,
             &settings,
@@ -2215,7 +2221,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                     .unwrap_or_default();
                 open_plan(app, title);
             }
-            "brief" => {
+            "home" => {
                 show_main(app);
                 let _ = app.emit_to("main", "hark-navigate", json!({ "target": "home" }));
             }
@@ -2788,7 +2794,16 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main(app);
         }))
-        .plugin(tauri_plugin_opener::init())
+        /* Without the plugin's own link catcher: it is put into every frame, so
+         * in a page Hark built (a hark.site frame) it caught each "new window"
+         * link and asked the app to open it, which a frame may not, and the link
+         * did nothing. bridge.js handles links on Hark's page; links in frames
+         * reach on_new_window. The app's own pages call openUrl directly. */
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         /* Remember where windows were, but not whether they were showing (Hark
