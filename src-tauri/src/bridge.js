@@ -19,6 +19,27 @@
   if (window.__HARK_DESKTOP__) return;
   window.__HARK_DESKTOP__ = true;
 
+  /* ---------- the channel to the app (macOS and Linux) ----------
+   * There the page reaches the app through WebKit's
+   * window.webkit.messageHandlers.ipc. Hark's own code redefines window.webkit
+   * as an object of its own (one "hark" handler), which cut the page off from
+   * the app: on the Mac, Hark never left the loading screen. Kept from before
+   * Hark's scripts run, and put back right before anything is sent. */
+  var nativeWebkit = window.webkit;
+  var appChannel = nativeWebkit && nativeWebkit.messageHandlers && nativeWebkit.messageHandlers.ipc;
+  function repairChannel() {
+    if (!appChannel) return;
+    try {
+      var w = window.webkit;
+      var handlers = w && w.messageHandlers;
+      if (w === nativeWebkit || (handlers && handlers.ipc === appChannel)) return;
+      try { if (handlers) handlers.ipc = appChannel; } catch (err) { /* frozen: use a copy */ }
+      if (handlers && handlers.ipc === appChannel) return;
+      var copy = Object.assign({}, w || {}, { messageHandlers: Object.assign({}, handlers || {}, { ipc: appChannel }) });
+      Object.defineProperty(window, "webkit", { configurable: true, enumerable: true, writable: true, value: copy });
+    } catch (err) { /* nothing more to try */ }
+  }
+
   /* ---------- rest: Hark is hidden or minimized ----------
    * The page stays fully awake (messages, notifications, plans) but stops
    * drawing: CSS animations pause, canvases hide, and animation frames run
@@ -117,6 +138,7 @@
   whenTauri(function (T) {
     var emit = function (name, payload) {
       try {
+        repairChannel();
         var sent = T.event.emit(name, payload || {});
         if (sent && sent.catch) sent.catch(function () { /* not allowed on this page */ });
       } catch (e) { /* shell gone */ }
@@ -826,6 +848,7 @@
   function installShellEvents(T, emit) {
     function on(name, fn) {
       try {
+        repairChannel();
         var p = T.event.listen(name, fn);
         if (p && p.catch) p.catch(function () { /* not allowed on this page */ });
       } catch (e) { /* shell gone */ }
