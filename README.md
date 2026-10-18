@@ -67,8 +67,8 @@ Measured on Windows 11 (Intel i9-12900H, 32 GB, WebView2 155, signed-in account,
 | Loading screen visible | about 0.6 s after launch |
 | Hark shown | median 3.1 s: as soon as Hark's own interface has painted, without waiting for the rest of the page |
 | Visible and idle | about 15 to 25% of one core. hark.com draws its animated sky continuously while it is on screen. |
-| Hidden in the tray, or minimized | under 1% of one core: the page stops drawing until you come back, and stays connected |
-| Plan island showing | under 1% of one core |
+| Hidden in the tray, or minimized | about 2 to 3% of one core. The page stays awake, so notifications and plan progress arrive on time, but Hark's animations pause until you come back. |
+| Plan island showing | the island itself adds under 1% of one core |
 | Memory | 350 to 450 MB private: the Rust shell is about 13 MB and the rest is WebView2's GPU and renderer processes, about what Edge spends on this page. No second Chromium is bundled. |
 | Resizing | about 170% of one core, only while you drag. The page catches up about 75 ms after the window. |
 | Quick ask after `Ctrl+Shift+H` | median 16 ms |

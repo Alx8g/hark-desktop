@@ -137,7 +137,7 @@
         <div class="nums" data-reveal="2">
           <div><b>2.3<small>MB</small></b><span>installer</span></div>
           <div><b>16<small>ms</small></b><span>from shortcut to a box on screen</span></div>
-          <div><b>&lt;1<small>%</small></b><span>of one core while it waits in the tray</span></div>
+          <div><b>&lt;3<small>%</small></b><span>of one core while it waits in the tray</span></div>
           <div><b>MIT</b><span>open source, free to change</span></div>
         </div>
         <p class="note">Measured on Windows 11 with a signed-in account. Most of the memory is the system web view, as it would be in a browser tab, because no second browser is bundled.</p>
@@ -211,7 +211,7 @@
           </details>
           <details>
             <summary>Why is it using several hundred megabytes?</summary>
-            <p>Almost all of that is the web view that draws hark.com, which is the same engine your browser uses. The app itself is about 13 MB. Hark animates its sky, so the page is never fully idle while the window is on screen. Hidden in the tray or minimized, the page stops drawing and the app uses under 1% of one core.</p>
+            <p>Almost all of that is the web view that draws hark.com, which is the same engine your browser uses. The app itself is about 13 MB. Hark animates its sky, so the page is never fully idle while the window is on screen. Hidden in the tray or minimized, the page stays awake for notifications but pauses its animations, and the app uses about 2 to 3% of one core.</p>
           </details>
           <details>
             <summary>Does it update itself?</summary>
