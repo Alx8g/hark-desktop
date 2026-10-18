@@ -102,7 +102,6 @@ a { color: inherit; }
 .toast .tile { --s: 4.6cqw; }
 .toast b { display: block; font-weight: 600; font-size: 1.9cqw; }
 .toast span { display: block; color: rgba(29, 29, 31, 0.68); }
-.stage .toast { right: 3.5cqw; bottom: 19cqw; width: 33cqw; transform: translateY(calc((1 - var(--p, 1)) * 2cqw)); }
 
 /* ---------- split sections ---------- */
 .block { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(28px, 6vw, 96px); align-items: center; width: min(1320px, calc(100% - 40px)); margin: clamp(88px, 12vw, 200px) auto 0; }
@@ -118,12 +117,6 @@ a { color: inherit; }
 /* quick ask */
 .keys { position: absolute; left: 0; right: 0; top: 13cqw; display: flex; justify-content: center; gap: 2.2cqw; }
 .key { min-width: 12cqw; height: 12cqw; padding: 0 2.6cqw; display: grid; place-items: center; border-radius: 2.6cqw; background: linear-gradient(#fff, #e7ecf5); color: var(--ink); font: 600 3.8cqw var(--sans); box-shadow: 0 1cqw 0 rgba(22, 32, 80, 0.35), 0 4cqw 7cqw rgba(10, 15, 45, 0.35), inset 0 0 0 1px #fff; }
-.qa { left: 50%; top: 47cqw; width: 80cqw; transform: translateX(-50%); padding: 3.4cqw 3.8cqw; border-radius: 5.2cqw; }
-.qa .q { font: 500 3.6cqw/1.3 var(--sans); letter-spacing: -0.015em; }
-.qa .q::after { content: ""; display: inline-block; width: 0.35cqw; height: 3.6cqw; margin-left: 0.6cqw; vertical-align: -0.6cqw; background: var(--ink); animation: blink 1.1s steps(1) infinite; }
-.qa .hint { display: flex; align-items: center; justify-content: space-between; margin-top: 3.6cqw; font: 400 2cqw var(--sans); color: rgba(29, 29, 31, 0.55); }
-.qa .send { display: grid; place-items: center; width: 6.4cqw; height: 6.4cqw; border-radius: 50%; background: var(--ink); }
-.qa .send svg { width: 3cqw; }
 @keyframes blink { 50% { opacity: 0; } }
 .ghost { border-radius: 3cqw; background: rgba(255, 255, 255, 0.16); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24); backdrop-filter: blur(6px); }
 .ghost.g1 { left: -6cqw; top: -8cqw; width: 60cqw; height: 46cqw; transform: rotate(-8deg); }
@@ -147,18 +140,9 @@ a { color: inherit; }
 .tray-label { left: 5cqw; top: 6cqw; max-width: 46cqw; font: italic 400 5.2cqw/1.05 var(--serif); letter-spacing: -0.02em; color: rgba(29, 29, 31, 0.85); }
 
 /* notifications */
-.toast.t1 { left: 8cqw; top: 9cqw; width: 66cqw; padding: 2.4cqw 2.8cqw; font-size: 2.2cqw; border-radius: 3cqw; }
-.toast.t1 .tile { --s: 6.6cqw; }
-.toast.t1 b { font-size: 2.4cqw; }
 .toast.t2 { left: 26cqw; top: 33cqw; width: 66cqw; padding: 2.4cqw 2.8cqw; font-size: 2.2cqw; border-radius: 3cqw; }
 .toast.t2 .tile { --s: 6.6cqw; }
 .toast.t2 b { font-size: 2.4cqw; }
-.progress { left: 50%; bottom: 8cqw; width: 54cqw; transform: translateX(-50%); display: flex; align-items: center; gap: 2.4cqw; padding: 2cqw 2.6cqw; border-radius: 4cqw; }
-.progress .tile { --s: 6cqw; }
-.progress .txt { flex: 1; font: 500 2.2cqw/1.2 var(--sans); }
-.progress .txt small { display: block; margin-top: 0.4cqw; font: 400 1.8cqw var(--sans); color: rgba(29, 29, 31, 0.6); }
-.bar { height: 1.1cqw; margin-top: 1.1cqw; border-radius: 1cqw; background: rgba(29, 29, 31, 0.12); overflow: hidden; }
-.bar::after { content: ""; display: block; width: 38%; height: 100%; border-radius: 1cqw; background: #1d1d1f; }
 
 /* security steps */
 .steps { position: absolute; inset: 7cqw 8cqw; display: flex; flex-direction: column; justify-content: center; gap: 2.4cqw; }
@@ -255,17 +239,13 @@ html.js [data-reveal="3"] { transition-delay: 0.24s; }
   .greet span { font-size: 2.6cqw; }
   .bubble { font-size: 2.7cqw; }
   .composer { font-size: 2.6cqw; }
-  .stage .toast { width: 52cqw; font-size: 2.4cqw; right: 3cqw; bottom: 3cqw; }
-  .stage .toast b { font-size: 2.6cqw; }
-  .stage .toast .tile { --s: 6.6cqw; }
   .win .caption { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   html.js [data-reveal] { opacity: 1; transform: none; transition: none; }
   .win { transform: translateX(-50%); }
-  .stage .toast { transform: none; }
-  .qa .q::after { animation: none; }
+  .little .lbar .q::after { animation: none; }
 }
 
 /* ---------- Hark Desktop 0.2: Little Hark, the plan island, the sky-filled tray icon ---------- */

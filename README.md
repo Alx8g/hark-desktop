@@ -29,10 +29,11 @@ First launch opens hark.com so you can sign in. After that you stay signed in, a
 - **Handoff plans at the top of the screen.** While a plan runs and Hark isn't in front, a small island at the top centre shows its name and its steps. Between steps it tucks into the screen edge as a thin line of sky; point at it and it opens up, with Open and Hide. When the plan finishes it turns to Hark's sky with a tick until you open it. The taskbar or Dock icon shows the progress too. On Linux, where see-through windows aren't dependable, the tray icon and a notification do this job.
 - **Tray or menu bar icon** with an unread dot and a grouped menu: Open Hark, Ask Hark, the running plan, Today's brief, Projects, Settings, Quit. On Windows and Linux, Hark's sky rises inside the icon as a plan's steps finish.
 - **Quick ask from anywhere.** `Ctrl+Shift+H` (`Cmd+Shift+H` on macOS) opens a little piece of Hark's sky with a message bar, near the top of the screen you're on. Enter opens Hark with your text drafted. It never sends for you. Esc or a click elsewhere closes it, and what you typed is still there next time.
-- **Opens where you left it.** While hark.com loads, the window shows Hark's sky rising from dawn to day, then Hark fades in. If loading is slow or you're offline, it says so and offers Try again.
+- **Opens where you left it.** While hark.com loads, the window shows Hark's own sky brightening from dawn, then Hark fades in. If loading is slow or you're offline, it says so and offers Try again.
+- **Looks like your Hark.** The app's own screens follow Hark's light or dark theme and use the sky Hark is showing, which changes with the time of day. The plan island stays out of the way while something runs full screen.
 - **Starts with your session, hidden,** so your morning brief can find you. On Windows this is on by default; on macOS and Linux it is opt-in. Every behaviour is switchable in Desktop settings (`Ctrl+,`).
 - **Sign-in screen that is only the sign-in.** Hark's signed-out page is a long marketing page. The desktop app shows just the sign-in, with no scrolling.
-- **Links stay sensible.** Hark, Google and Apple sign-in, Cloudflare and Stripe open in the app. Everything else opens in your default browser. Downloads go to your Downloads folder with a notification.
+- **Links stay sensible.** Hark and the Google, Apple, Stripe and Cloudflare pages its sign-in and payments use open in the app. Everything else opens in your default browser. Downloads go to your Downloads folder with a notification and never overwrite a file; programs and installers open in your browser instead, so its download checks apply.
 
 ## Shortcuts
 
@@ -63,16 +64,15 @@ Measured on Windows 11 (Intel i9-12900H, 32 GB, WebView2 155, signed-in account,
 | | |
 | --- | --- |
 | Installer size | about 2.3 MB (a typical Electron wrapper is 80 to 200 MB) |
-| Splash visible | about 0.2 s after launch |
-| Main window with hark.com fully loaded | median 5.3 s. The page's own timeline is first paint at 1.6 s and load event at 4.4 s, so most of this is the website. |
-| Visible and idle | 4 to 10% of one core (about 0.3% of the whole PC), 60 fps, no dropped frames. hark.com animates its background continuously. |
-| Hidden in the tray | 2 to 7% of one core once settled |
-| Memory | 370 to 450 MB private: the Rust shell is 10 MB and the rest is WebView2's GPU and renderer processes, about what Edge spends on this page. No second Chromium is bundled. |
+| Loading screen visible | about 0.6 s after launch |
+| Hark shown | median 3.1 s: as soon as Hark's own interface has painted, without waiting for the rest of the page |
+| Visible and idle | about 15 to 25% of one core. hark.com draws its animated sky continuously while it is on screen. |
+| Hidden in the tray, or minimized | under 1% of one core: the page stops drawing until you come back, and stays connected |
+| Plan island showing | under 1% of one core |
+| Memory | 350 to 450 MB private: the Rust shell is about 13 MB and the rest is WebView2's GPU and renderer processes, about what Edge spends on this page. No second Chromium is bundled. |
 | Resizing | about 170% of one core, only while you drag. The page catches up about 75 ms after the window. |
 | Quick ask after `Ctrl+Shift+H` | median 16 ms |
 | Main window back from the tray | median 47 ms |
-
-Unexplained: in one 15-minute observation the hidden app had a single burst (about 40% of a core, private memory 368 to 921 MB and back to about 660 MB over 40 seconds) with no matching growth in handles or threads. It is probably the page garbage-collecting after a sync. Watch memory if it ever keeps growing over days.
 
 ## Security
 
