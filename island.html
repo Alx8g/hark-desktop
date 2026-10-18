@@ -65,6 +65,14 @@
       .isl.done .sliver { background: rgba(13, 29, 51, 0.15); }
       .isl.done::before { content: ""; position: absolute; inset: 0; z-index: 0; background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.65) 50%, transparent 70%); background-size: 260% 100%; animation: sweep 1.3s 0.15s ease-out both; pointer-events: none; }
       @keyframes sweep { from { background-position: 160% 0; } to { background-position: -100% 0; } }
+      /* A live run (Hark working on a request): no steps to count, so the ring
+         turns and the bar sweeps, only while the pill is in view. */
+      .isl.live:not(.tucked):not(.done) .ring svg { animation: turn 1.4s linear infinite; }
+      @keyframes turn { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+      .segs.busy i { width: 32%; background: linear-gradient(90deg, #7fb0dd, #d3e6f7, #7fb0dd); }
+      .isl.open-up .segs.busy i { animation: sweep-bar 1.6s ease-in-out infinite alternate; }
+      @keyframes sweep-bar { from { transform: translateX(0); } to { transform: translateX(212%); } }
+      .isl.live:not(.done) .sliver b { opacity: 0.65; }
       /* Windows high contrast. Last, so it wins over the rules above. */
       @media (forced-colors: active) {
         .isl { border: 1px solid CanvasText; }
