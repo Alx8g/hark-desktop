@@ -15,8 +15,8 @@
 //! the top of the screen) and `settings`.
 
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -396,12 +396,127 @@ pub struct AppState {
     start_hidden: AtomicBool,
     /* The main window's last navigation has finished, well or badly. */
     page_finished: AtomicBool,
-    /* Quick-ask text that arrived before Hark had loaded. */
+    /* ...and bridge.js reported from it, so it really is hark.com. */
+    page_ok: AtomicBool,
+    /* Quick-ask text that arrived before Hark had loaded. Also guards the
+     * hand-over in reveal_main, so no text is lost in between. */
     pending_compose: Mutex<Option<String>>,
     unread: AtomicI64,
     plans: Mutex<Plans>,
     island_rect: Mutex<IslandRect>,
     tray_menu: Mutex<Option<TrayMenu>>,
+    appearance: Mutex<Appearance>,
+    notified: Mutex<Vec<Instant>>,
+    /* One worker brings the island and tray up to date (refresh_plans_soon). */
+    refresh: (Mutex<bool>, Condvar),
+    /* Whether the island is on screen; the pointer watcher sleeps when not. */
+    island_shown: (Mutex<bool>, Condvar),
+    island_geo: Mutex<IslandGeo>,
+    /* Cleared if the island window could not be built: notify instead. */
+    island_ok: AtomicBool,
+    /* What the tray last showed, so unchanged updates are skipped. */
+    tray_key: Mutex<String>,
+    /* The last taskbar progress, put back when Plan progress is turned on. */
+    last_progress: Mutex<Option<u64>>,
+    /* Whether WebView2 has been told Hark's page is on screen (set_page_visible). */
+    page_visible: AtomicBool,
+}
+
+/* Where the island window is, in the same units as the pointer: physical
+ * pixels on Windows and Linux, points on macOS. rect_scale turns the page's
+ * CSS pixels into those units; cursor_scale turns the pointer into them. */
+#[derive(Debug, Clone, Copy)]
+struct IslandGeo {
+    x: f64,
+    y: f64,
+    rect_scale: f64,
+    cursor_scale: f64,
+}
+
+impl Default for IslandGeo {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            rect_scale: 1.0,
+            cursor_scale: 1.0,
+        }
+    }
+}
+
+/* ------------------------------ appearance ------------------------------ */
+
+/* Hark's theme ("light" or "dark") and the sky image it is showing, reported
+ * by bridge.js and kept between runs, so the shell's own windows match Hark
+ * before it has even loaded. */
+#[derive(Debug, Clone, Default, Serialize)]
+struct Appearance {
+    theme: String,
+    sky: Option<String>,
+}
+
+/* Only the small inline image Hark keeps in its stylesheet is accepted. */
+fn valid_sky(sky: &str) -> bool {
+    let body = [
+        "data:image/webp;base64,",
+        "data:image/png;base64,",
+        "data:image/jpeg;base64,",
+    ]
+    .iter()
+    .find_map(|prefix| sky.strip_prefix(prefix));
+    match body {
+        Some(body) => {
+            sky.len() < 60_000
+                && !body.is_empty()
+                && body
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')
+        }
+        None => false,
+    }
+}
+
+fn valid_theme(theme: &str) -> Option<String> {
+    matches!(theme, "light" | "dark").then(|| theme.to_string())
+}
+
+/* Runs before each local page's own scripts: sets data-theme and the sky on
+ * <html> as soon as it exists, so the page paints in Hark's look straight
+ * away (src/appearance.ts keeps it up to date afterwards). */
+fn appearance_script(app: &AppHandle) -> String {
+    let appearance = app
+        .state::<AppState>()
+        .appearance
+        .lock()
+        .map(|a| a.clone())
+        .unwrap_or_default();
+    let json = serde_json::to_string(&appearance).unwrap_or_else(|_| "{}".to_string());
+    format!(
+        r#"window.__HARK_APPEARANCE__ = {json};
+(function (a) {{
+  function apply() {{
+    var root = document.documentElement;
+    if (!root) return false;
+    if (a.theme) root.setAttribute("data-theme", a.theme);
+    if (a.sky) {{ root.style.setProperty("--sky-image", 'url("' + a.sky + '") center / cover no-repeat'); root.setAttribute("data-sky", ""); }}
+    return true;
+  }}
+  if (!apply()) {{ var wait = new MutationObserver(function () {{ if (apply()) wait.disconnect(); }}); wait.observe(document, {{ childList: true }}); }}
+}})(window.__HARK_APPEARANCE__);"#
+    )
+}
+
+fn load_appearance(app: &AppHandle) -> Appearance {
+    let Ok(store) = app.store(STORE_FILE) else {
+        return Appearance::default();
+    };
+    let text = |key: &str| store.get(key).and_then(|v| v.as_str().map(str::to_string));
+    Appearance {
+        theme: text("theme")
+            .and_then(|t| valid_theme(&t))
+            .unwrap_or_default(),
+        sky: text("sky").filter(|s| valid_sky(s)),
+    }
 }
 
 /* ------------------------------ plan state ------------------------------ */
@@ -580,9 +695,13 @@ fn set_setting(app: AppHandle, key: String, value: bool) -> Result<(), String> {
         apply_autostart(&app, value);
     }
     if key == "taskbar_progress" {
-        if !value {
-            set_taskbar_progress(&app, None);
-        }
+        let last = app
+            .state::<AppState>()
+            .last_progress
+            .lock()
+            .map(|v| *v)
+            .unwrap_or(None);
+        set_taskbar_progress(&app, if value { last } else { None });
         refresh_plans_soon(&app);
     }
     persist_settings(&app, &snapshot);
@@ -599,36 +718,53 @@ fn test_notification(app: AppHandle) {
     );
 }
 
-#[tauri::command]
+/* Commands that show, hide, build or close a window are async: a synchronous
+ * command runs on the main thread inside WebView2's own callback, where
+ * building a window deadlocks on Windows. */
+#[tauri::command(async)]
 fn reload_main(app: AppHandle) {
+    show_main(&app);
     if let Some(main) = app.get_webview_window("main") {
-        let _ = main.show();
-        let _ = main.set_focus();
         if let Ok(url) = Url::parse(HARK_URL) {
             let _ = main.navigate(url);
         }
     }
 }
 
+/* Has Hark painted? The loading screen checks before it fades, so only the
+ * shell (not a stray event) can end it. */
 #[tauri::command]
+fn app_loaded(app: AppHandle) -> bool {
+    app.state::<AppState>()
+        .first_load_done
+        .load(Ordering::SeqCst)
+}
+
+#[tauri::command(async)]
 fn quick_compose(app: AppHandle, text: String) {
     if let Some(quick) = app.get_webview_window("quick") {
         let _ = quick.hide();
     }
     let state = app.state::<AppState>();
-    if !state.first_load_done.load(Ordering::SeqCst) {
-        // Hark is still loading: the text is handed over once it has painted.
-        if !text.is_empty() {
-            if let Ok(mut slot) = state.pending_compose.lock() {
-                *slot = Some(text);
-            }
+    let loaded = {
+        // Checked and stored under the same lock reveal_main takes the text with.
+        let Ok(mut pending) = state.pending_compose.lock() else {
+            return;
+        };
+        let loaded = state.first_load_done.load(Ordering::SeqCst);
+        if !loaded && !text.is_empty() {
+            *pending = Some(match pending.take() {
+                Some(earlier) => format!("{earlier}\n\n{text}"),
+                None => text.clone(),
+            });
         }
-        show_main(&app);
-        return;
-    }
+        loaded
+    };
     show_main(&app);
-    // Give the window a beat to foreground before the page receives the text.
-    deliver_compose(&app, text, 180);
+    if loaded {
+        // Give the window a beat to foreground before the page receives the text.
+        deliver_compose(&app, text, 180);
+    }
 }
 
 fn deliver_compose(app: &AppHandle, text: String, delay_ms: u64) {
@@ -639,9 +775,8 @@ fn deliver_compose(app: &AppHandle, text: String, delay_ms: u64) {
     });
 }
 
-/* Loading screen "Try again": load hark.com again in the hidden main window. */
-#[tauri::command]
-fn splash_retry(app: AppHandle) {
+/* Load hark.com again in the hidden main window ("Try again", or a retry). */
+fn retry_load(app: &AppHandle) {
     if let Some(main) = app.get_webview_window("main") {
         if let Ok(url) = Url::parse(HARK_URL) {
             let _ = main.navigate(url);
@@ -649,12 +784,21 @@ fn splash_retry(app: AppHandle) {
     }
 }
 
+#[tauri::command(async)]
+fn splash_retry(app: AppHandle) {
+    retry_load(&app);
+}
+
 /* Loading screen closed, or "Hide to tray": Hark keeps loading in the tray. */
-#[tauri::command]
+#[tauri::command(async)]
 fn splash_hide(app: AppHandle) {
-    app.state::<AppState>()
-        .start_hidden
-        .store(true, Ordering::SeqCst);
+    // "Hide to tray" (Windows) and "Hide" (macOS) mean it. On Linux, where the
+    // tray may not exist, the window's own rule decides (see the run loop).
+    if settings_snapshot(&app).close_to_tray || !cfg!(target_os = "linux") {
+        app.state::<AppState>()
+            .start_hidden
+            .store(true, Ordering::SeqCst);
+    }
     if let Some(splash) = app.get_webview_window("splash") {
         let _ = splash.close();
     }
@@ -662,7 +806,12 @@ fn splash_hide(app: AppHandle) {
 
 #[tauri::command]
 fn island_state(app: AppHandle) -> PlanView {
-    island_view(&app)
+    // Idle while the island is on its way out, so the pill lifts away.
+    if island_wanted(&app) {
+        island_view(&app)
+    } else {
+        PlanView::idle()
+    }
 }
 
 #[tauri::command]
@@ -673,13 +822,13 @@ fn island_rect(app: AppHandle, x: f64, y: f64, w: f64, h: f64, solid: bool) {
 }
 
 /* The island's Open: bring Hark forward on that plan. */
-#[tauri::command]
+#[tauri::command(async)]
 fn island_open(app: AppHandle) {
     let title = island_view(&app).title;
     open_plan(&app, title);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn island_hide_plan(app: AppHandle) {
     let title = island_view(&app).title;
     if let Ok(mut plans) = app.state::<AppState>().plans.lock() {
@@ -688,7 +837,7 @@ fn island_hide_plan(app: AppHandle) {
     refresh_plans_soon(&app);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn island_dismiss(app: AppHandle) {
     if let Ok(mut plans) = app.state::<AppState>().plans.lock() {
         plans.finished = None;
@@ -734,8 +883,8 @@ fn show_main(app: &AppHandle) {
     let state = app.state::<AppState>();
     if !state.first_load_done.load(Ordering::SeqCst) {
         state.start_hidden.store(false, Ordering::SeqCst);
-        if state.page_finished.load(Ordering::SeqCst) {
-            splash_retry(app.clone());
+        if state.page_finished.load(Ordering::SeqCst) && !state.page_ok.load(Ordering::SeqCst) {
+            retry_load(app);
         }
         open_splash(app);
         return;
@@ -743,7 +892,33 @@ fn show_main(app: &AppHandle) {
     show_main_now(app);
 }
 
+/* A hidden or minimized window keeps painting at full speed unless WebView2
+ * is told: Hark's animated sky would keep a core and the GPU busy all day in
+ * the tray. Told "not visible", the page stops drawing but stays connected, so
+ * messages, notifications and plans carry on. macOS and Linux do this
+ * themselves. */
+#[cfg(windows)]
+fn set_page_visible(app: &AppHandle, visible: bool) {
+    if app
+        .state::<AppState>()
+        .page_visible
+        .swap(visible, Ordering::SeqCst)
+        == visible
+    {
+        return;
+    }
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.with_webview(move |webview| unsafe {
+            let _ = webview.controller().SetIsVisible(visible);
+        });
+    }
+}
+
+#[cfg(not(windows))]
+fn set_page_visible(_app: &AppHandle, _visible: bool) {}
+
 fn show_main_now(app: &AppHandle) {
+    set_page_visible(app, true);
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.unminimize();
         let _ = main.show();
@@ -755,6 +930,7 @@ fn show_main_now(app: &AppHandle) {
 /* Closing the window keeps Hark in the tray. The first time, say so. */
 fn hide_to_tray(app: &AppHandle, main: &WebviewWindow) {
     let _ = main.hide();
+    set_page_visible(app, false);
     if let Ok(store) = app.store(STORE_FILE) {
         if store.get("told_about_tray").and_then(|v| v.as_bool()) == Some(true) {
             return;
@@ -776,6 +952,7 @@ fn toggle_main(app: &AppHandle) {
         let focused = main.is_focused().unwrap_or(false);
         if visible && focused {
             let _ = main.hide();
+            set_page_visible(app, false);
         } else {
             show_main(app);
         }
@@ -869,7 +1046,8 @@ fn open_settings(app: &AppHandle) {
         "settings",
         WebviewUrl::App("settings.html".into()),
     ))
-    .title("Hark Settings")
+    .title("Hark Desktop settings")
+    .initialization_script(appearance_script(app))
     .inner_size(540.0, 660.0)
     .min_inner_size(460.0, 520.0)
     .center()
@@ -881,25 +1059,58 @@ fn open_settings(app: &AppHandle) {
     }
 }
 
+/* The pointer, in the units monitor_from_point expects (points on macOS). */
+fn pointer_for_monitor_lookup(app: &AppHandle) -> Option<(f64, f64)> {
+    let p = app.cursor_position().ok()?;
+    if cfg!(target_os = "macos") {
+        let scale = app.primary_monitor().ok().flatten()?.scale_factor();
+        Some((p.x / scale, p.y / scale))
+    } else {
+        Some((p.x, p.y))
+    }
+}
+
+/* Put a window of `width` (logical px) centred across a monitor's work area,
+ * `down` of the way down it. Windows and Linux in physical pixels; macOS in
+ * points, which is what its monitor and pointer coordinates are based on. */
+fn place_on(window: &WebviewWindow, monitor: &tauri::Monitor, width: f64, down: f64) {
+    let area = monitor.work_area();
+    let scale = monitor.scale_factor();
+    if cfg!(target_os = "macos") {
+        let x =
+            f64::from(area.position.x) / scale + (f64::from(area.size.width) / scale - width) / 2.0;
+        let y = f64::from(area.position.y) / scale + f64::from(area.size.height) / scale * down;
+        let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+    } else {
+        let w = (width * scale).round() as i32;
+        let x = area.position.x + (area.size.width as i32 - w) / 2;
+        let y = area.position.y + (f64::from(area.size.height) * down).round() as i32;
+        let _ = window.set_position(PhysicalPosition::new(x, y));
+    }
+}
+
 /* The quick ask opens in the upper part of the screen the pointer is on. */
 fn place_quick(app: &AppHandle, quick: &WebviewWindow) {
-    let monitor = app
-        .cursor_position()
-        .ok()
-        .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
+    let monitor = pointer_for_monitor_lookup(app)
+        .and_then(|(x, y)| app.monitor_from_point(x, y).ok().flatten())
         .or_else(|| app.primary_monitor().ok().flatten());
-    let Some(monitor) = monitor else { return };
-    let area = monitor.work_area();
-    let width = (QUICK_SIZE.0 * monitor.scale_factor()).round() as i32;
-    let x = area.position.x + (area.size.width as i32 - width) / 2;
-    let y = area.position.y + (f64::from(area.size.height) * 0.18).round() as i32;
-    let _ = quick.set_position(PhysicalPosition::new(x, y));
+    if let Some(monitor) = monitor {
+        place_on(quick, &monitor, QUICK_SIZE.0, 0.18);
+    }
 }
 
 fn toggle_quick(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("quick") {
         if win.is_visible().unwrap_or(false) {
-            let _ = win.hide();
+            // The page fades out and hides itself, so its last frame is never
+            // the first thing seen next time. Hide it here if it doesn't.
+            let _ = app.emit_to("quick", "quick-hide", json!({}));
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(400));
+                if win.is_visible().unwrap_or(false) {
+                    let _ = win.hide();
+                }
+            });
         } else {
             place_quick(app, &win);
             let _ = win.show();
@@ -920,6 +1131,7 @@ fn toggle_quick(app: &AppHandle) {
     .inner_size(QUICK_SIZE.0, QUICK_SIZE.1)
     .resizable(false)
     .visible(false)
+    .initialization_script(appearance_script(app))
     .build()
     {
         polish_frame(&win);
@@ -957,6 +1169,26 @@ fn island_wanted(app: &AppHandle) -> bool {
         && settings_snapshot(app).taskbar_progress
         && island_view(app).phase != "idle"
         && !main_in_front(app)
+        && !screen_busy()
+}
+
+/* Someone is gaming, presenting or watching something full screen (or the
+ * screen is locked): the island keeps out of the way, as Windows' own
+ * notifications do. The same signal Windows uses for them. */
+#[cfg(windows)]
+fn screen_busy() -> bool {
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SHQueryUserNotificationState(state: *mut i32) -> i32;
+    }
+    // QUNS_NOT_PRESENT 1, QUNS_BUSY 2, QUNS_RUNNING_D3D_FULL_SCREEN 3, QUNS_PRESENTATION_MODE 4
+    let mut state = 0i32;
+    unsafe { SHQueryUserNotificationState(&mut state) == 0 && matches!(state, 1..=4) }
+}
+
+#[cfg(not(windows))]
+fn screen_busy() -> bool {
+    false
 }
 
 fn open_plan(app: &AppHandle, title: String) {
@@ -976,42 +1208,107 @@ fn open_plan(app: &AppHandle, title: String) {
     refresh_plans_soon(app);
 }
 
-/* Off the calling thread: building the island window from a synchronous
- * command or a window event can deadlock WebView2 on Windows. */
-fn refresh_plans_soon(app: &AppHandle) {
-    let handle = app.clone();
-    std::thread::spawn(move || refresh_plans(&handle));
+/* A plan is running or has just finished, and plan progress is on. */
+fn plan_active(app: &AppHandle) -> bool {
+    settings_snapshot(app).taskbar_progress && island_view(app).phase != "idle"
 }
 
-/* Bring the island and the tray in line with the plans Hark is running. */
+/* Ask the refresh worker to bring the island and the tray up to date. Cheap
+ * and safe from any thread; bursts of requests collapse into one refresh. */
+fn refresh_plans_soon(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let (dirty, wake) = &state.refresh;
+    if let Ok(mut dirty) = dirty.lock() {
+        *dirty = true;
+        wake.notify_one();
+    };
+}
+
+/* The only place the island and tray are changed, one refresh at a time, so
+ * two refreshes can never race (two islands, or an older view winning). It
+ * runs off the main thread, where building the island window is safe. */
+fn start_refresh_worker(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || loop {
+        {
+            let state = app.state::<AppState>();
+            let (dirty, wake) = &state.refresh;
+            let Ok(mut pending) = dirty.lock() else {
+                return;
+            };
+            while !*pending {
+                pending = match wake.wait(pending) {
+                    Ok(guard) => guard,
+                    Err(_) => return,
+                };
+            }
+            *pending = false;
+        }
+        if app.state::<AppState>().quitting.load(Ordering::SeqCst) {
+            return;
+        }
+        refresh_plans(&app);
+    });
+}
+
+fn set_island_shown(app: &AppHandle, shown: bool) {
+    let state = app.state::<AppState>();
+    let (flag, wake) = &state.island_shown;
+    if let Ok(mut flag) = flag.lock() {
+        *flag = shown;
+        wake.notify_all();
+    };
+}
+
+fn island_is_shown(app: &AppHandle) -> bool {
+    app.state::<AppState>()
+        .island_shown
+        .0
+        .lock()
+        .map(|f| *f)
+        .unwrap_or(false)
+}
+
+/* Bring the island and the tray in line with the plans Hark is running.
+ * Called by the refresh worker only. */
 fn refresh_plans(app: &AppHandle) {
     update_tray(app);
-    let view = island_view(app);
-    if island_wanted(app) {
-        if let Some(island) = ensure_island(app) {
-            if !island.is_visible().unwrap_or(false) {
-                place_island(app, &island);
-                let _ = island.show();
-            }
-            let _ = app.emit_to("island", "plan-state", &view);
-        }
+    if cfg!(target_os = "linux") || !plan_active(app) {
+        hide_island(app);
         return;
     }
-    let Some(island) = app.get_webview_window("island") else {
+    // Built (hidden) as soon as a plan is active, even while something is full
+    // screen, so the pointer watcher is there to notice when that ends.
+    let Some(island) = ensure_island(app) else {
         return;
     };
-    let _ = app.emit_to("island", "plan-state", PlanView::idle());
-    if island.is_visible().unwrap_or(false) {
-        let handle = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(450)); // let the pill lift away
-            if !island_wanted(&handle) {
-                if let Some(island) = handle.get_webview_window("island") {
-                    let _ = island.hide();
-                }
-            }
-        });
+    if !island_wanted(app) {
+        hide_island(app);
+        return;
     }
+    if !island_is_shown(app) {
+        set_click_through(&island, true);
+        place_island(app, &island);
+        let _ = island.show();
+        set_island_shown(app, true);
+    }
+    let _ = app.emit_to("island", "plan-state", island_view(app));
+}
+
+/* Let the pill lift away, then hide the window. */
+fn hide_island(app: &AppHandle) {
+    if !island_is_shown(app) {
+        return;
+    }
+    let _ = app.emit_to("island", "plan-state", PlanView::idle());
+    std::thread::sleep(Duration::from_millis(450));
+    if island_wanted(app) {
+        return;
+    }
+    if let Some(island) = app.get_webview_window("island") {
+        let _ = island.hide();
+    }
+    set_island_shown(app, false);
 }
 
 fn ensure_island(app: &AppHandle) -> Option<WebviewWindow> {
@@ -1022,7 +1319,7 @@ fn ensure_island(app: &AppHandle) -> Option<WebviewWindow> {
         return Some(win);
     }
     /* Never focusable: it must not take the keyboard from whatever you're doing. */
-    let win = frameless(WebviewWindowBuilder::new(
+    let built = frameless(WebviewWindowBuilder::new(
         app,
         "island",
         WebviewUrl::App("island.html".into()),
@@ -1036,8 +1333,16 @@ fn ensure_island(app: &AppHandle) -> Option<WebviewWindow> {
     .focused(false)
     .focusable(false)
     .visible(false)
-    .build()
-    .ok()?;
+    .initialization_script(appearance_script(app));
+    // macOS: a click on the island works even while Hark is in the background.
+    #[cfg(target_os = "macos")]
+    let built = built.accept_first_mouse(true);
+    let Ok(win) = built.build() else {
+        app.state::<AppState>()
+            .island_ok
+            .store(false, Ordering::SeqCst);
+        return None;
+    };
     polish_frame(&win);
     let _ = win.set_ignore_cursor_events(true);
     watch_island_pointer(app.clone());
@@ -1051,42 +1356,142 @@ fn place_island(app: &AppHandle, island: &WebviewWindow) {
         .and_then(|m| m.current_monitor().ok().flatten())
         .or_else(|| app.primary_monitor().ok().flatten());
     let Some(monitor) = monitor else { return };
+    place_on(island, &monitor, ISLAND_SIZE.0, 0.0);
     let area = monitor.work_area();
-    let width = (ISLAND_SIZE.0 * monitor.scale_factor()).round() as i32;
-    let x = area.position.x + (area.size.width as i32 - width) / 2;
-    let _ = island.set_position(PhysicalPosition::new(x, area.position.y));
+    let scale = monitor.scale_factor();
+    let geo = if cfg!(target_os = "macos") {
+        let primary = app
+            .primary_monitor()
+            .ok()
+            .flatten()
+            .map(|m| m.scale_factor())
+            .unwrap_or(scale);
+        IslandGeo {
+            x: f64::from(area.position.x) / scale
+                + (f64::from(area.size.width) / scale - ISLAND_SIZE.0) / 2.0,
+            y: f64::from(area.position.y) / scale,
+            rect_scale: 1.0,
+            cursor_scale: primary,
+        }
+    } else {
+        let w = (ISLAND_SIZE.0 * scale).round() as i32;
+        IslandGeo {
+            x: f64::from(area.position.x + (area.size.width as i32 - w) / 2),
+            y: f64::from(area.position.y),
+            rect_scale: scale,
+            cursor_scale: 1.0,
+        }
+    };
+    if let Ok(mut slot) = app.state::<AppState>().island_geo.lock() {
+        *slot = geo;
+    }
+}
+
+/* Whether the island lets clicks through to what is beneath it. On Windows
+ * this sets the window style directly: going through tao re-shows the window
+ * on every change, which can hand it the keyboard. */
+#[cfg(windows)]
+fn set_click_through(island: &WebviewWindow, through: bool) {
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetWindowLongPtrW(hwnd: *mut core::ffi::c_void, index: i32) -> isize;
+        fn SetWindowLongPtrW(hwnd: *mut core::ffi::c_void, index: i32, value: isize) -> isize;
+    }
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_TRANSPARENT: isize = 0x20;
+    let Ok(hwnd) = island.hwnd() else { return };
+    let hwnd = hwnd.0;
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let next = if through {
+            style | WS_EX_TRANSPARENT
+        } else {
+            style & !WS_EX_TRANSPARENT
+        };
+        if next != style {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn set_click_through(island: &WebviewWindow, through: bool) {
+    let _ = island.set_ignore_cursor_events(through);
+}
+
+/* The pointer, in island units (see IslandGeo). Windows reads it directly:
+ * it is safe from any thread and needs no trip to the main thread. */
+#[cfg(windows)]
+fn pointer(_app: &AppHandle) -> Option<(f64, f64)> {
+    #[repr(C)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetCursorPos(point: *mut Point) -> i32;
+    }
+    let mut p = Point { x: 0, y: 0 };
+    (unsafe { GetCursorPos(&mut p) } != 0).then(|| (f64::from(p.x), f64::from(p.y)))
+}
+
+#[cfg(not(windows))]
+fn pointer(app: &AppHandle) -> Option<(f64, f64)> {
+    app.cursor_position().ok().map(|p| (p.x, p.y))
 }
 
 /* The island window lets every click through except on the pill itself. A
  * see-through window can't feel the mouse while it ignores it, so this
  * watches the pointer instead: it tells the page when the pointer is over the
  * pill (it opens up after a moment), and lets the pill take clicks only once
- * it is fully on screen. A tucked island never blocks the tabs beneath it. */
+ * it is fully on screen. A tucked island never blocks the tabs beneath it.
+ * While the island is hidden this sleeps, waking once a second only while a
+ * plan is active, to notice a full-screen app closing. */
 fn watch_island_pointer(app: AppHandle) {
     std::thread::spawn(move || {
         let mut inside = false;
         let mut catching = false;
+        let mut busy = screen_busy();
+        let mut checked = Instant::now();
         loop {
             if app.state::<AppState>().quitting.load(Ordering::SeqCst) {
                 break;
             }
-            let Some(island) = app.get_webview_window("island") else {
-                break;
-            };
-            if !island.is_visible().unwrap_or(false) {
+            if checked.elapsed() >= Duration::from_secs(1) {
+                checked = Instant::now();
+                let now_busy = screen_busy();
+                if now_busy != busy {
+                    busy = now_busy;
+                    refresh_plans_soon(&app);
+                }
+            }
+            if !island_is_shown(&app) {
                 if inside {
                     inside = false;
                     let _ = app.emit_to("island", "island-pointer", json!({ "inside": false }));
                 }
-                std::thread::sleep(Duration::from_millis(250));
+                catching = false;
+                let active = plan_active(&app);
+                let state = app.state::<AppState>();
+                let (flag, wake) = &state.island_shown;
+                if let Ok(shown) = flag.lock() {
+                    if !*shown {
+                        if active {
+                            drop(wake.wait_timeout(shown, Duration::from_secs(1)));
+                        } else {
+                            drop(wake.wait(shown));
+                        }
+                    }
+                }
                 continue;
             }
-            let mut rect = app
-                .state::<AppState>()
-                .island_rect
-                .lock()
-                .map(|r| *r)
-                .unwrap_or_default();
+            let Some(island) = app.get_webview_window("island") else {
+                break;
+            };
+            let state = app.state::<AppState>();
+            let geo = state.island_geo.lock().map(|g| *g).unwrap_or_default();
+            let mut rect = state.island_rect.lock().map(|r| *r).unwrap_or_default();
             if rect.w <= 0.0 {
                 // The page hasn't said where the pill is yet: assume it is tucked, centred.
                 rect = IslandRect {
@@ -1097,20 +1502,15 @@ fn watch_island_pointer(app: AppHandle) {
                     solid: false,
                 };
             }
-            if let (Ok(cursor), Ok(origin), Ok(scale)) = (
-                app.cursor_position(),
-                island.outer_position(),
-                island.scale_factor(),
-            ) {
-                let left = f64::from(origin.x) + rect.x * scale;
-                let top = f64::from(origin.y) + rect.y * scale;
+            if let Some((px, py)) = pointer(&app) {
+                let (px, py) = (px / geo.cursor_scale, py / geo.cursor_scale);
+                let left = geo.x + rect.x * geo.rect_scale;
+                let top = geo.y + rect.y * geo.rect_scale;
+                let width = rect.w * geo.rect_scale;
                 // A tucked pill is a few pixels tall: give the screen edge a little more.
-                let height = (rect.h * scale).max(8.0 * scale);
-                let now_inside = rect.w > 0.0
-                    && cursor.x >= left
-                    && cursor.x <= left + rect.w * scale
-                    && cursor.y >= top
-                    && cursor.y <= top + height;
+                let height = (rect.h * geo.rect_scale).max(8.0 * geo.rect_scale);
+                let now_inside =
+                    px >= left && px <= left + width && py >= top && py <= top + height;
                 if now_inside != inside {
                     inside = now_inside;
                     let _ = app.emit_to("island", "island-pointer", json!({ "inside": inside }));
@@ -1118,7 +1518,7 @@ fn watch_island_pointer(app: AppHandle) {
                 let catch = inside && rect.solid;
                 if catch != catching {
                     catching = catch;
-                    let _ = island.set_ignore_cursor_events(!catch);
+                    set_click_through(&island, !catch);
                 }
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -1126,31 +1526,60 @@ fn watch_island_pointer(app: AppHandle) {
     });
 }
 
-/* Hosts allowed to navigate inside the app: Hark itself plus the identity,
- * challenge and payment providers its flows bounce through. Everything else
- * opens in the user's default browser. Mirrors bridge.js. */
-fn host_allowed(url: &Url) -> bool {
-    let Some(host) = url.host_str() else {
-        return true;
+/* Links handed to the operating system: web pages, email and phone only.
+ * Anything else (file:, search-ms:, ms-settings:, other apps' schemes) is
+ * dropped, so a page can never launch another program through the shell. */
+fn external_url(raw: &str) -> Option<Url> {
+    if raw.len() > 2048 {
+        return None;
+    }
+    let url = Url::parse(raw).ok()?;
+    let ok = match url.scheme() {
+        "https" | "http" => url.host_str().is_some(),
+        "mailto" | "tel" => true,
+        _ => false,
     };
-    const HOSTS: [&str; 7] = [
-        "hark.com",
-        "accounts.google.com",
-        "appleid.apple.com",
-        "challenges.cloudflare.com",
-        "js.stripe.com",
-        "checkout.stripe.com",
-        "m.stripe.network",
-    ];
-    const SUFFIXES: [&str; 6] = [
-        ".hark.com",
-        ".google.com",
-        ".gstatic.com",
-        ".apple.com",
-        ".stripe.com",
-        ".cloudflare.com",
-    ];
-    HOSTS.contains(&host) || SUFFIXES.iter().any(|s| host.ends_with(s))
+    ok.then_some(url)
+}
+
+fn open_external(app: &AppHandle, raw: &str) {
+    if let Some(url) = external_url(raw) {
+        let _ = app.opener().open_url(url.as_str(), None::<&str>);
+    }
+}
+
+/* Pages that may open inside the app: Hark, and the sign-in, payment and
+ * challenge pages its flows pass through. Exact hosts only, over https: a
+ * suffix such as ".google.com" would also admit pages anyone can publish
+ * there, shown in a window with no address bar. Mirrors bridge.js. */
+const IN_APP_HOSTS: [&str; 8] = [
+    "hark.com",
+    "www.hark.com",
+    "accounts.google.com",
+    "appleid.apple.com",
+    "checkout.stripe.com",
+    "billing.stripe.com",
+    "hooks.stripe.com",
+    "challenges.cloudflare.com",
+];
+
+fn in_app_page(url: &Url) -> bool {
+    url.scheme() == "https"
+        && url
+            .host_str()
+            .map(|h| IN_APP_HOSTS.contains(&h) || h.ends_with(".hark.com"))
+            .unwrap_or(false)
+}
+
+/* Top-level navigation in the main window: an in-app page, the browser's own
+ * blank page, or an in-memory file Hark itself made (a blob: download). */
+fn host_allowed(url: &Url) -> bool {
+    match url.scheme() {
+        "https" => in_app_page(url),
+        "about" => matches!(url.as_str(), "about:blank" | "about:srcdoc"),
+        "blob" => url.as_str().starts_with("blob:https://hark.com/"),
+        _ => false,
+    }
 }
 
 /* ------------------------------- windows -------------------------------- */
@@ -1167,15 +1596,17 @@ fn open_splash(app: &AppHandle) {
     }
     // Built before the main window at start-up, so it pays WebView2's one-off
     // start-up cost and appears as early as possible. Same default size as main.
+    let (width, height) = default_window_size(app);
     let Ok(splash) = frameless(WebviewWindowBuilder::new(
         app,
         "splash",
         WebviewUrl::App("index.html".into()),
     ))
     .title("Hark")
-    .inner_size(1440.0, 920.0)
+    .inner_size(width, height)
     .center()
     .visible(false)
+    .initialization_script(appearance_script(app))
     .build() else {
         return;
     };
@@ -1192,15 +1623,37 @@ fn open_splash(app: &AppHandle) {
         })
         .or_else(|| saved_main_bounds(app));
     if let Some((position, size, maximized)) = bounds {
+        // Move first, so a maximized window maximizes on the right screen.
+        let _ = splash.set_position(position);
         if maximized {
             let _ = splash.maximize();
         } else {
-            let _ = splash.set_position(position);
             let _ = splash.set_size(size);
         }
     }
+    // Hark may have finished loading while this was being built.
+    if app
+        .state::<AppState>()
+        .first_load_done
+        .load(Ordering::SeqCst)
+    {
+        let _ = splash.close();
+        show_main_now(app);
+        return;
+    }
     let _ = splash.show();
     let _ = splash.set_focus();
+}
+
+/* Hark's default window size (1440 x 920), made to fit the screen. */
+fn default_window_size(app: &AppHandle) -> (f64, f64) {
+    let Some(monitor) = app.primary_monitor().ok().flatten() else {
+        return (1440.0, 920.0);
+    };
+    let area = monitor.work_area();
+    let scale = monitor.scale_factor();
+    let fit = |want: f64, room: u32| want.min(f64::from(room) / scale - 48.0).max(600.0);
+    (fit(1440.0, area.size.width), fit(920.0, area.size.height))
 }
 
 /* Where the main window will open, read from the window-state plugin's file
@@ -1212,12 +1665,27 @@ fn saved_main_bounds(
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()?;
     let main = saved.get("main")?;
     let number = |key: &str| main.get(key).and_then(Value::as_i64);
-    let (x, y) = (number("x")? as i32, number("y")? as i32);
-    let (width, height) = (number("width")? as u32, number("height")? as u32);
-    let centre = (
+    let (x, y) = (
+        i32::try_from(number("x")?).ok()?,
+        i32::try_from(number("y")?).ok()?,
+    );
+    let (width, height) = (
+        u32::try_from(number("width")?)
+            .ok()
+            .filter(|w| (200..20_000).contains(w))?,
+        u32::try_from(number("height")?)
+            .ok()
+            .filter(|h| (200..20_000).contains(h))?,
+    );
+    let mut centre = (
         f64::from(x) + f64::from(width) / 2.0,
         f64::from(y) + f64::from(height) / 2.0,
     );
+    if cfg!(target_os = "macos") {
+        // macOS looks monitors up in points.
+        let scale = app.primary_monitor().ok().flatten()?.scale_factor();
+        centre = (centre.0 / scale, centre.1 / scale);
+    }
     app.monitor_from_point(centre.0, centre.1).ok().flatten()?;
     let maximized = main.get("maximized").and_then(Value::as_bool) == Some(true);
     Some((
@@ -1231,19 +1699,24 @@ fn saved_main_bounds(
  * screen and fade the loading screen away. Or stay in the tray. */
 fn reveal_main(app: &AppHandle) {
     let state = app.state::<AppState>();
-    if state.first_load_done.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    let pending = state
-        .pending_compose
-        .lock()
-        .ok()
-        .and_then(|mut slot| slot.take());
+    // Mark it loaded and take any waiting quick-ask text under one lock, so a
+    // quick ask arriving at this moment is either taken here or sent directly.
+    let pending = {
+        let Ok(mut pending) = state.pending_compose.lock() else {
+            return;
+        };
+        if state.first_load_done.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        pending.take()
+    };
     let splash = app.get_webview_window("splash");
     if state.start_hidden.load(Ordering::SeqCst) {
         if let Some(splash) = splash {
             let _ = splash.close();
         }
+        // Started in the tray (at sign-in, say): loaded and painted, now rest.
+        set_page_visible(app, false);
         return;
     }
     let Some(splash) = splash.filter(|s| s.is_visible().unwrap_or(false)) else {
@@ -1253,18 +1726,24 @@ fn reveal_main(app: &AppHandle) {
         }
         return;
     };
-    // The loading screen may have been moved or resized: Hark opens where it is.
-    if let Some(main) = app.get_webview_window("main") {
-        if splash.is_maximized().unwrap_or(false) {
-            let _ = main.maximize();
-        } else if cfg!(windows) {
-            if let (Ok(position), Ok(size)) = (splash.outer_position(), splash.outer_size()) {
-                let _ = main.set_position(position);
-                let _ = main.set_size(size);
+    // A minimized loading screen reports a far-off position: never copy that.
+    let minimized = splash.is_minimized().unwrap_or(false);
+    if !minimized {
+        // The loading screen may have been moved or resized: Hark opens where it is.
+        if let Some(main) = app.get_webview_window("main") {
+            if splash.is_maximized().unwrap_or(false) {
+                if let Ok(position) = splash.outer_position() {
+                    let _ = main.set_position(position);
+                }
+                let _ = main.maximize();
+            } else if cfg!(windows) {
+                if let (Ok(position), Ok(size)) = (splash.outer_position(), splash.outer_size()) {
+                    let _ = main.set_position(position);
+                    let _ = main.set_size(size);
+                }
             }
         }
     }
-    let minimized = splash.is_minimized().unwrap_or(false);
     let _ = splash.set_always_on_top(true);
     let _ = app.emit_to("splash", "hark-loaded", json!({}));
     let handle = app.clone();
@@ -1300,11 +1779,11 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
         WebviewUrl::External(url),
     ))
     .title("Hark")
-    .inner_size(1440.0, 920.0)
+    .inner_size(default_window_size(app).0, default_window_size(app).1)
     /* The signed-out screen is a locked, non-scrolling hero (bridge.js);
      * its sign-in form and legal text need ~660px, so don't let the window
      * shrink below that or the bottom of it becomes unreachable. */
-    .min_inner_size(900.0, 680.0)
+    .min_inner_size(900.0, 560.0)
     .center()
     .visible(false)
     .focused(true)
@@ -1313,42 +1792,73 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
         if host_allowed(url) {
             true
         } else {
-            let _ = nav_app.opener().open_url(url.as_str(), None::<&str>);
+            open_external(&nav_app, url.as_str());
             false
         }
     })
     .on_new_window(move |url: Url, _features| {
-        if host_allowed(&url) {
+        if in_app_page(&url) {
             // Auth redirects (Google / Apple) complete in-place.
             if let Some(main) = new_win_app.get_webview_window("main") {
                 let _ = main.navigate(url);
             }
         } else {
-            let _ = new_win_app.opener().open_url(url.as_str(), None::<&str>);
+            open_external(&new_win_app, url.as_str());
         }
         tauri::webview::NewWindowResponse::Deny
     })
     .on_page_load(|window, payload| {
         // The loading screen waits for bridge.js to say Hark has painted
-        // ("hark-painted"); this only notes whether the last load has ended.
+        // ("hark-painted"); this notes whether the last load has ended, and
+        // whether bridge.js has spoken from it (see "hark-ready").
+        let app = window.app_handle().clone();
+        let state = app.state::<AppState>();
         let finished = payload.event() == tauri::webview::PageLoadEvent::Finished;
-        window
-            .app_handle()
-            .state::<AppState>()
-            .page_finished
-            .store(finished, Ordering::SeqCst);
+        state.page_finished.store(finished, Ordering::SeqCst);
+        if !finished {
+            state.page_ok.store(false, Ordering::SeqCst);
+            return;
+        }
+        // Landed somewhere bridge.js can't report from (a sign-in page, say):
+        // show it rather than keep the loading screen up.
+        let elsewhere = payload.url().host_str() != Some("hark.com");
+        if elsewhere && payload.url().scheme() == "https" {
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(1500));
+                reveal_main(&app);
+            });
+        }
     })
     .on_download(move |_webview, event| {
         match event {
             tauri::webview::DownloadEvent::Requested { url, destination } => {
-                let name = url
-                    .path_segments()
-                    .and_then(|mut s| s.next_back())
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or("hark-download")
-                    .to_string();
+                // The name the site suggests (Content-Disposition), else the URL's.
+                let suggested = destination
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .filter(|n| !n.trim().is_empty())
+                    .or_else(|| {
+                        url.path_segments()
+                            .and_then(|mut s| s.next_back())
+                            .filter(|n| !n.is_empty())
+                            .map(str::to_string)
+                    })
+                    .unwrap_or_default();
+                let name = safe_file_name(&suggested);
+                // Anything that can run code goes through the browser, where
+                // SmartScreen and the browser's own download checks apply.
+                if runs_code(&name) {
+                    open_external(&download_app, url.as_str());
+                    notify(
+                        &download_app,
+                        "Hark",
+                        &format!("{name} opened in your browser, which checks programs before saving them"),
+                        false,
+                    );
+                    return false;
+                }
                 if let Ok(dir) = download_app.path().download_dir() {
-                    *destination = dir.join(name);
+                    *destination = unique_path(&dir, &name);
                 }
             }
             tauri::webview::DownloadEvent::Finished { path, success, .. } => {
@@ -1375,17 +1885,119 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
     hold_corners(&window);
     // Hark in front: hide the plan island, and a finished plan counts as seen.
     let focus_app = app.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::Focused(focused) = event {
+    window.on_window_event(move |event| match event {
+        WindowEvent::Focused(focused) => {
             if *focused {
+                set_page_visible(&focus_app, true);
                 if let Ok(mut plans) = focus_app.state::<AppState>().plans.lock() {
                     plans.finished = None;
                 }
             }
             refresh_plans_soon(&focus_app);
         }
+        // Minimized, or back from it (the taskbar button, Win+D...).
+        WindowEvent::Resized(_) => {
+            if let Some(main) = focus_app.get_webview_window("main") {
+                if main.is_minimized().unwrap_or(false) {
+                    set_page_visible(&focus_app, false);
+                } else if main.is_visible().unwrap_or(false) {
+                    set_page_visible(&focus_app, true);
+                }
+            }
+        }
+        _ => {}
     });
+    start_refresh_worker(app);
     Ok(())
+}
+
+/* A file name Windows, macOS and Linux all accept. */
+fn safe_file_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || "<>:\"/\\|?*".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches('.').trim();
+    if trimmed.is_empty() {
+        "hark-download".to_string()
+    } else {
+        trimmed.chars().take(180).collect()
+    }
+}
+
+/* File types that run code when opened. */
+fn runs_code(name: &str) -> bool {
+    const TYPES: [&str; 44] = [
+        "exe",
+        "msi",
+        "msix",
+        "msixbundle",
+        "appx",
+        "appxbundle",
+        "bat",
+        "cmd",
+        "com",
+        "cpl",
+        "hta",
+        "jar",
+        "js",
+        "jse",
+        "lnk",
+        "msc",
+        "ps1",
+        "psm1",
+        "reg",
+        "scr",
+        "url",
+        "vbe",
+        "vbs",
+        "wsf",
+        "wsh",
+        "iso",
+        "img",
+        "vhd",
+        "vhdx",
+        "dll",
+        "sys",
+        "application",
+        "appref-ms",
+        "pif",
+        "inf",
+        "scf",
+        "settingcontent-ms",
+        "library-ms",
+        "sh",
+        "app",
+        "dmg",
+        "pkg",
+        "command",
+        "appimage",
+    ];
+    name.rsplit_once('.')
+        .map(|(_, ext)| TYPES.contains(&ext.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+/* Never overwrite a file already in Downloads: "name (1).ext", "name (2).ext"... */
+fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => name.split_at(i),
+        _ => (name, ""),
+    };
+    (1..1000)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|p| !p.exists())
+        .unwrap_or(first)
 }
 
 /* --------------------------------- tray --------------------------------- */
@@ -1583,6 +2195,38 @@ fn blend_over(dst: &mut [u8], src: &[u8]) {
     }
 }
 
+/* Text from the page shown natively (island, tray, tooltip, notifications):
+ * no control or text-direction characters, and a sensible length. */
+fn clean_text(text: &str, max: usize) -> String {
+    let kept: String = text
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(*c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+        .collect();
+    let trimmed = kept.trim();
+    if trimmed.chars().count() > max {
+        format!("{}…", trimmed.chars().take(max - 1).collect::<String>())
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/* A plan as reported by the page, within limits the UI can draw. */
+fn clean_plan(title: &str, done: u64, total: u64) -> Option<PlanInfo> {
+    let title = clean_text(title, 120);
+    if title.is_empty() || total == 0 {
+        return None;
+    }
+    let total = total.min(64);
+    Some(PlanInfo {
+        title,
+        done: done.min(total),
+        total,
+    })
+}
+
 fn short_title(title: &str) -> String {
     if title.chars().count() > 42 {
         format!("{}…", title.chars().take(41).collect::<String>())
@@ -1591,7 +2235,8 @@ fn short_title(title: &str) -> String {
     }
 }
 
-/* Tray icon, tooltip and menu, the unread badge, and the running plan. */
+/* Tray icon, tooltip and menu, the unread badge, and the running plan.
+ * Called by the refresh worker only; unchanged updates are skipped. */
 fn update_tray(app: &AppHandle) {
     let state = app.state::<AppState>();
     let unread = state.unread.load(Ordering::SeqCst);
@@ -1604,12 +2249,22 @@ fn update_tray(app: &AppHandle) {
     } else {
         PlanView::idle()
     };
+    let key = format!(
+        "{}|{}|{}|{}|{unread}",
+        plan.phase, plan.title, plan.done, plan.total
+    );
+    if let Ok(mut last) = state.tray_key.lock() {
+        if *last == key {
+            return;
+        }
+        *last = key;
+    }
     let title = short_title(&plan.title);
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let tooltip = match plan.phase {
             "running" => format!(
                 "Hark · {title}, step {} of {}",
-                (plan.done + 1).min(plan.total),
+                plan.done.saturating_add(1).min(plan.total),
                 plan.total
             ),
             "done" => format!("Hark · {title} is done"),
@@ -1618,39 +2273,58 @@ fn update_tray(app: &AppHandle) {
         };
         let _ = tray.set_tooltip(Some(tooltip));
         if let Some(icon) = tray_icon(&plan, unread > 0) {
+            // macOS: keep it a template glyph, which the menu bar tints.
+            #[cfg(target_os = "macos")]
+            let _ = tray.set_icon_with_as_template(Some(icon), true);
+            #[cfg(not(target_os = "macos"))]
             let _ = tray.set_icon(Some(icon));
         }
     }
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.set_badge_count(if unread > 0 { Some(unread) } else { None });
     }
-    let Ok(mut slot) = state.tray_menu.lock() else {
-        return;
+    // Take what is needed out of the lock: each menu change waits on the main thread.
+    let (menu, open, plan_item, plan_gap, shown) = {
+        let Ok(slot) = state.tray_menu.lock() else {
+            return;
+        };
+        let Some(t) = slot.as_ref() else {
+            return;
+        };
+        (
+            t.menu.clone(),
+            t.open.clone(),
+            t.plan.clone(),
+            t.plan_gap.clone(),
+            t.plan_shown,
+        )
     };
-    let Some(tray_menu) = slot.as_mut() else {
-        return;
-    };
-    let _ = tray_menu.open.set_text(if unread > 0 {
+    let _ = open.set_text(if unread > 0 {
         format!("Open Hark ({unread} unread)")
     } else {
         "Open Hark".to_string()
     });
     let show_plan = plan.phase != "idle";
     if show_plan {
-        let _ = tray_menu.plan.set_text(match plan.phase {
+        let _ = plan_item.set_text(match plan.phase {
             "done" => format!("{title} · done"),
             _ => format!("{title} · {} of {}", plan.done, plan.total),
         });
     }
-    if show_plan != tray_menu.plan_shown {
-        if show_plan {
-            let _ = tray_menu.menu.insert(&tray_menu.plan, 3);
-            let _ = tray_menu.menu.insert(&tray_menu.plan_gap, 4);
+    if show_plan != shown {
+        let changed = if show_plan {
+            menu.insert(&plan_item, 3)
+                .and_then(|_| menu.insert(&plan_gap, 4))
         } else {
-            let _ = tray_menu.menu.remove(&tray_menu.plan);
-            let _ = tray_menu.menu.remove(&tray_menu.plan_gap);
+            menu.remove(&plan_item).and_then(|_| menu.remove(&plan_gap))
+        };
+        if changed.is_ok() {
+            if let Ok(mut slot) = state.tray_menu.lock() {
+                if let Some(t) = slot.as_mut() {
+                    t.plan_shown = show_plan;
+                }
+            }
         }
-        tray_menu.plan_shown = show_plan;
     }
 }
 
@@ -1664,8 +2338,28 @@ fn install_bridge_listeners(app: &AppHandle) {
     let h = app.clone();
     app.listen("hark-notify", move |event| {
         let v = parse_payload(&event);
-        let title = v.get("title").and_then(Value::as_str).unwrap_or("Hark");
-        let body = v.get("body").and_then(Value::as_str).unwrap_or("");
+        let title = clean_text(v.get("title").and_then(Value::as_str).unwrap_or("Hark"), 64);
+        let title = if title.is_empty() {
+            "Hark".to_string()
+        } else {
+            title
+        };
+        let body = clean_text(v.get("body").and_then(Value::as_str).unwrap_or(""), 240);
+        let body = body.as_str();
+        let title = title.as_str();
+        // A page can't flood the desktop: at most 6 notifications a minute.
+        {
+            let state = h.state::<AppState>();
+            let Ok(mut recent) = state.notified.lock() else {
+                return;
+            };
+            let now = std::time::Instant::now();
+            recent.retain(|t| now.duration_since(*t) < Duration::from_secs(60));
+            if recent.len() >= 6 {
+                return;
+            }
+            recent.push(now);
+        }
         // Skip toasts while the user is already looking at Hark.
         let looking = h
             .get_webview_window("main")
@@ -1681,7 +2375,7 @@ fn install_bridge_listeners(app: &AppHandle) {
         let v = parse_payload(&event);
         let count = v.get("count").and_then(Value::as_i64).unwrap_or(0);
         h.state::<AppState>().unread.store(count, Ordering::SeqCst);
-        update_tray(&h);
+        refresh_plans_soon(&h);
     });
 
     // The loading screen hands over once Hark has painted. If the paint signal
@@ -1690,6 +2384,7 @@ fn install_bridge_listeners(app: &AppHandle) {
     app.listen("hark-painted", move |_event| reveal_main(&h));
     let h = app.clone();
     app.listen("hark-ready", move |_event| {
+        h.state::<AppState>().page_ok.store(true, Ordering::SeqCst);
         let h = h.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(8));
@@ -1698,14 +2393,72 @@ fn install_bridge_listeners(app: &AppHandle) {
     });
 
     let h = app.clone();
+    app.listen("hark-appearance", move |event| {
+        let v = parse_payload(&event);
+        let theme = v
+            .get("theme")
+            .and_then(Value::as_str)
+            .and_then(valid_theme)
+            .unwrap_or_default();
+        let sky = v
+            .get("sky")
+            .and_then(Value::as_str)
+            .filter(|s| valid_sky(s))
+            .map(str::to_string);
+        let state = h.state::<AppState>();
+        let next = {
+            let Ok(mut current) = state.appearance.lock() else {
+                return;
+            };
+            if current.theme == theme && (sky.is_none() || current.sky == sky) {
+                return;
+            }
+            current.theme = theme;
+            if sky.is_some() {
+                current.sky = sky;
+            }
+            current.clone()
+        };
+        if let Ok(store) = h.store(STORE_FILE) {
+            store.set("theme", json!(next.theme));
+            if let Some(sky) = &next.sky {
+                store.set("sky", json!(sky));
+            }
+            let _ = store.save();
+        }
+        for label in ["splash", "quick", "island", "settings"] {
+            let _ = h.emit_to(label, "hark-appearance", &next);
+        }
+    });
+
+    let h = app.clone();
     app.listen("hark-plans", move |event| {
         let v = parse_payload(&event);
         let active: Vec<PlanInfo> = v
             .get("plans")
             .cloned()
-            .and_then(|p| serde_json::from_value(p).ok())
-            .unwrap_or_default();
+            .and_then(|p| serde_json::from_value::<Vec<PlanInfo>>(p).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .take(8)
+            .filter_map(|p| clean_plan(&p.title, p.done, p.total))
+            .collect();
         if let Ok(mut plans) = h.state::<AppState>().plans.lock() {
+            // "Hide until it's done" ends if that plan stops running (cancelled).
+            let hidden_still_running = plans
+                .hidden
+                .as_ref()
+                .map(|t| active.iter().any(|p| &p.title == t))
+                .unwrap_or(true);
+            if !hidden_still_running
+                && plans
+                    .finished
+                    .as_ref()
+                    .map(|f| Some(&f.title) == plans.hidden.as_ref())
+                    != Some(true)
+            {
+                plans.hidden = None;
+            }
             plans.active = active;
         }
         refresh_plans_soon(&h);
@@ -1714,12 +2467,8 @@ fn install_bridge_listeners(app: &AppHandle) {
     let h = app.clone();
     app.listen("hark-plan-done", move |event| {
         let v = parse_payload(&event);
-        let title = v
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        let total = v.get("total").and_then(Value::as_u64).unwrap_or(0);
+        let title = clean_text(v.get("title").and_then(Value::as_str).unwrap_or(""), 120);
+        let total = v.get("total").and_then(Value::as_u64).unwrap_or(0).min(64);
         let looking = main_in_front(&h);
         if let Ok(mut plans) = h.state::<AppState>().plans.lock() {
             if plans.hidden.as_deref() == Some(title.as_str()) {
@@ -1736,7 +2485,9 @@ fn install_bridge_listeners(app: &AppHandle) {
             };
         }
         // Where the island can't show it, a notification says which plan finished.
-        let island = !cfg!(target_os = "linux") && settings_snapshot(&h).taskbar_progress;
+        let island = !cfg!(target_os = "linux")
+            && settings_snapshot(&h).taskbar_progress
+            && h.state::<AppState>().island_ok.load(Ordering::SeqCst);
         if !looking && !island && !title.is_empty() {
             notify(&h, "Plan finished", &title, false);
         }
@@ -1745,19 +2496,53 @@ fn install_bridge_listeners(app: &AppHandle) {
 
     let h = app.clone();
     app.listen("hark-progress", move |event| {
-        if !settings_snapshot(&h).taskbar_progress {
+        let v = parse_payload(&event);
+        let value = v.get("value").and_then(Value::as_u64).map(|p| p.min(100));
+        // Kept even while Plan progress is off, to show at once when it is turned on.
+        if let Ok(mut last) = h.state::<AppState>().last_progress.lock() {
+            *last = value;
+        }
+        if settings_snapshot(&h).taskbar_progress {
+            set_taskbar_progress(&h, value);
+        }
+    });
+
+    // Hark couldn't take quick-ask text (no message box): give it back.
+    let h = app.clone();
+    app.listen("hark-compose-result", move |event| {
+        let v = parse_payload(&event);
+        if v.get("ok").and_then(Value::as_bool) != Some(false) {
             return;
         }
-        let v = parse_payload(&event);
-        let value = v.get("value").and_then(Value::as_u64);
-        set_taskbar_progress(&h, value);
+        let text: String = v
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .chars()
+            .take(20_000)
+            .collect();
+        if text.trim().is_empty() {
+            return;
+        }
+        let h = h.clone();
+        std::thread::spawn(move || {
+            if h.get_webview_window("quick").is_none() {
+                toggle_quick(&h);
+                std::thread::sleep(Duration::from_millis(700));
+            } else if let Some(quick) = h.get_webview_window("quick") {
+                place_quick(&h, &quick);
+                let _ = quick.show();
+                let _ = quick.set_focus();
+            }
+            let _ = h.emit_to("quick", "quick-restore", json!({ "text": text }));
+        });
     });
 
     let h = app.clone();
     app.listen("hark-external", move |event| {
         let v = parse_payload(&event);
         if let Some(url) = v.get("url").and_then(Value::as_str) {
-            let _ = h.opener().open_url(url, None::<&str>);
+            open_external(&h, url);
         }
     });
 
@@ -1821,7 +2606,10 @@ pub fn run() {
          * decides that), and not for the windows that place themselves. */
         .plugin(
             tauri_plugin_window_state::Builder::new()
-                .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                .with_state_flags(
+                    StateFlags::all()
+                        & !(StateFlags::VISIBLE | StateFlags::FULLSCREEN | StateFlags::DECORATIONS),
+                )
                 .with_denylist(&["splash", "quick", "island"])
                 .build(),
         )
@@ -1857,17 +2645,28 @@ pub fn run() {
             first_load_done: AtomicBool::new(false),
             start_hidden: AtomicBool::new(start_hidden),
             page_finished: AtomicBool::new(false),
+            page_ok: AtomicBool::new(false),
             pending_compose: Mutex::new(None),
             unread: AtomicI64::new(0),
             plans: Mutex::new(Plans::default()),
             island_rect: Mutex::new(IslandRect::default()),
             tray_menu: Mutex::new(None),
+            appearance: Mutex::new(Appearance::default()),
+            notified: Mutex::new(Vec::new()),
+            refresh: (Mutex::new(false), Condvar::new()),
+            island_shown: (Mutex::new(false), Condvar::new()),
+            island_geo: Mutex::new(IslandGeo::default()),
+            island_ok: AtomicBool::new(true),
+            tray_key: Mutex::new(String::new()),
+            last_progress: Mutex::new(None),
+            page_visible: AtomicBool::new(true),
         })
         .invoke_handler(tauri::generate_handler![
             get_settings,
             set_setting,
             test_notification,
             reload_main,
+            app_loaded,
             quick_compose,
             splash_retry,
             splash_hide,
@@ -1889,7 +2688,16 @@ pub fn run() {
                 };
             }
             persist_settings(handle, &settings);
-            apply_autostart(handle, settings.autostart);
+            // Only touch the sign-in entry when it disagrees with the setting, so a
+            // second copy of the app (a test build, a portable exe) never repoints it.
+            let registered = handle.autolaunch().is_enabled().unwrap_or(false);
+            if registered != settings.autostart {
+                apply_autostart(handle, settings.autostart);
+            }
+            let appearance = load_appearance(handle);
+            if let Ok(mut slot) = handle.state::<AppState>().appearance.lock() {
+                *slot = appearance;
+            }
 
             build_tray(handle)?;
             if !start_hidden {
@@ -1917,8 +2725,11 @@ pub fn run() {
                     .get_webview_window("splash")
                     .map(|s| s.is_visible().unwrap_or(false))
                     .unwrap_or(false);
-                if !splash_up && state.page_finished.load(Ordering::SeqCst) {
-                    splash_retry(retry.clone());
+                if !splash_up
+                    && state.page_finished.load(Ordering::SeqCst)
+                    && !state.page_ok.load(Ordering::SeqCst)
+                {
+                    retry_load(&retry);
                 }
             });
 
@@ -1945,18 +2756,45 @@ pub fn run() {
                     quit(app);
                 }
             }
+            // The loading screen closing, by its own button or by the system
+            // (Alt+F4, the window menu): Hark keeps loading in the tray.
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: WindowEvent::CloseRequested { .. },
+                ..
+            } if label == "splash" => {
+                let state = app.state::<AppState>();
+                if !state.first_load_done.load(Ordering::SeqCst)
+                    && !state.quitting.load(Ordering::SeqCst)
+                    && !state.start_hidden.load(Ordering::SeqCst)
+                {
+                    if settings_snapshot(app).close_to_tray {
+                        state.start_hidden.store(true, Ordering::SeqCst);
+                    } else {
+                        // No tray to keep loading in (the Linux default): closing quits.
+                        quit(app);
+                    }
+                }
+            }
             tauri::RunEvent::ExitRequested { api, .. } => {
                 let state = app.state::<AppState>();
                 if !state.quitting.load(Ordering::SeqCst) && settings_snapshot(app).close_to_tray {
                     api.prevent_exit();
                 }
             }
-            /* Clicking the Dock icon while Hark is hidden in the menu bar. */
+            /* Clicking the Dock icon: bring Hark back if it is hidden or minimized.
+             * (The island and Settings count as visible windows, so the flag
+             * AppKit passes can't be relied on.) */
             #[cfg(target_os = "macos")]
-            tauri::RunEvent::Reopen {
-                has_visible_windows: false,
-                ..
-            } => show_main(app),
+            tauri::RunEvent::Reopen { .. } => {
+                let hidden = app
+                    .get_webview_window("main")
+                    .map(|m| !m.is_visible().unwrap_or(false) || m.is_minimized().unwrap_or(false))
+                    .unwrap_or(true);
+                if hidden {
+                    show_main(app);
+                }
+            }
             _ => {}
         });
 }
@@ -2032,6 +2870,101 @@ mod tests {
             dot[0] > 200 && dot[1] < 140 && dot[2] < 80,
             "orange unread dot"
         );
+    }
+
+    #[test]
+    fn only_web_mail_and_phone_links_reach_the_system() {
+        for ok in [
+            "https://example.com/a",
+            "http://example.com",
+            "mailto:a@b.c",
+            "tel:+6421000000",
+        ] {
+            assert!(external_url(ok).is_some(), "{ok}");
+        }
+        for bad in [
+            "file:///C:/Windows/System32/calc.exe",
+            r"search-ms:query=x&crumb=location:\\evil\share",
+            "ms-settings:privacy",
+            "ms-msdt:/id",
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "https://",
+            "not a url",
+        ] {
+            assert!(external_url(bad).is_none(), "{bad}");
+        }
+        assert!(external_url(&format!("https://example.com/{}", "a".repeat(3000))).is_none());
+    }
+
+    #[test]
+    fn only_hark_and_its_sign_in_pages_open_inside_the_app() {
+        let url = |s: &str| Url::parse(s).expect("url");
+        for ok in [
+            "https://hark.com/chat",
+            "https://app.hark.com/",
+            "https://accounts.google.com/o/oauth2/v2/auth",
+            "https://appleid.apple.com/auth/authorize",
+            "https://checkout.stripe.com/c/pay",
+            "about:blank",
+            "blob:https://hark.com/1234",
+        ] {
+            assert!(host_allowed(&url(ok)), "{ok}");
+        }
+        for bad in [
+            "http://hark.com/",
+            "https://sites.google.com/view/anything",
+            "https://evilhark.com/",
+            "https://hark.com.evil.example/",
+            "file:///C:/",
+            "data:text/html,hi",
+            "blob:https://evil.example/1",
+            "about:config",
+        ] {
+            assert!(!host_allowed(&url(bad)), "{bad}");
+        }
+        assert!(
+            !in_app_page(&url("about:blank")),
+            "a popup never blanks Hark's window"
+        );
+    }
+
+    #[test]
+    fn downloads_get_safe_unique_names_and_programs_go_to_the_browser() {
+        assert_eq!(safe_file_name("C:evil.dll"), "C_evil.dll");
+        assert_eq!(safe_file_name(r"..\..\x.txt"), "_.._x.txt");
+        assert_eq!(safe_file_name("  report.pdf. "), "report.pdf");
+        assert_eq!(safe_file_name(""), "hark-download");
+        assert!(runs_code("setup.EXE") && runs_code("a.ps1") && runs_code("x.lnk"));
+        assert!(!runs_code("report.pdf") && !runs_code("photo.jpg") && !runs_code("noext"));
+        let dir = std::env::temp_dir().join(format!("hark-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join("notes.txt"), b"x").expect("file");
+        std::fs::write(dir.join("notes (1).txt"), b"x").expect("file");
+        assert_eq!(unique_path(&dir, "notes.txt"), dir.join("notes (2).txt"));
+        assert_eq!(unique_path(&dir, "new.txt"), dir.join("new.txt"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn page_text_is_cleaned_and_plans_are_kept_drawable() {
+        assert_eq!(clean_text("  Plan\u{202e}gnp.exe\n ", 120), "Plangnp.exe");
+        assert_eq!(clean_text(&"x".repeat(200), 10).chars().count(), 10);
+        let plan = clean_plan("Big", 900, 100_000).expect("plan");
+        assert_eq!((plan.done, plan.total), (64, 64));
+        assert!(clean_plan("", 1, 2).is_none() && clean_plan("x", 0, 0).is_none());
+    }
+
+    #[test]
+    fn only_inline_sky_images_are_accepted() {
+        assert!(valid_sky("data:image/webp;base64,UklGRpQC+/="));
+        assert!(!valid_sky("data:image/svg+xml;base64,PHN2Zz4="));
+        assert!(!valid_sky("data:image/webp;base64,abc\"); x: y"));
+        assert!(!valid_sky("https://example.com/sky.webp"));
+        assert!(!valid_sky(&format!(
+            "data:image/webp;base64,{}",
+            "A".repeat(70_000)
+        )));
     }
 
     #[test]

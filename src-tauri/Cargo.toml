@@ -15,7 +15,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # macos-private-api: needed for transparent (rounded) windows on macOS. No effect on Windows/Linux.
-tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri = { version = "2.12.4", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
@@ -25,6 +25,11 @@ tauri-plugin-store = "2"
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Windows: tell WebView2 when Hark is hidden or minimized, so its page stops painting.
+# Same version Tauri itself uses.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
 
 # Keep the shell tiny and fast: the whole product is this binary + WebView2.
 [profile.release]
