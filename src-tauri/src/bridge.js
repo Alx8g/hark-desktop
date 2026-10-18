@@ -614,6 +614,33 @@
   var PLAN_LABEL = /^(.*)\.\s*Plan,\s*(\d+)\s*of\s*(\d+)\s*steps?\s+done/;
   var PLAN_BUTTONS = 'button[aria-label*=". Plan, "]';
   var PLAN_MEMORY = 20 * 60 * 1000;
+  /* Hark's live run: while Hark works on a request (since October 2026 its
+   * usual way, in place of plan buttons) one pill at the end of the chat says
+   * what it is doing ("Opening booking.com", "Reading a page"), with no step
+   * count. It is reported as a plan with no steps ("live"), titled with the
+   * request that started it, and done once the pill has gone from the chat. */
+  var RUN_PILL = '[data-testid="live-run-pill"]';
+  var RUN_GONE_MS = 4000; /* a pill re-drawn between phases is not a finish */
+  function readRunNote() {
+    var pill = document.querySelector(RUN_PILL);
+    if (!pill) return null;
+    /* While one line of narration replaces another both are present: the newest is last. */
+    var spans = pill.querySelectorAll('[data-testid="run-narration"] span');
+    var note = "";
+    for (var i = spans.length - 1; i >= 0 && !note; i--) note = (spans[i].textContent || "").trim();
+    return note.replace(/\s+/g, " ").slice(0, 140);
+  }
+  /* The request a run is working on: the newest of the user's own messages. */
+  function runTitle() {
+    var bubbles = document.querySelectorAll('[data-testid="message-bubble"]');
+    for (var i = bubbles.length - 1; i >= 0 && i >= bubbles.length - 12; i--) {
+      if (classifyBubble(bubbles[i], "") !== "user") continue;
+      var textEl = bubbles[i].querySelector('[data-testid="message-text"]') || bubbles[i];
+      var text = (textEl.textContent || "").trim().replace(/\s+/g, " ");
+      if (text) return text.length > 100 ? text.slice(0, 99).replace(/\s+\S*$/, "") + "…" : text;
+    }
+    return "Hark is working";
+  }
   function readPlans() {
     var plans = [];
     document.querySelectorAll(PLAN_BUTTONS).forEach(function (btn) {
@@ -626,20 +653,50 @@
     return plans;
   }
   function installProgress(emit) {
-    var lastPct = -1; /* -1 = no active plan */
+    var lastProgress = "|false"; /* "<percent or empty>|<busy>": nothing running */
     var lastSent = "";
     /* title -> { done, total, seen } for every plan last known to be running */
     var running = {};
     try { running = JSON.parse(sessionStorage.getItem("harkDesktopPlans") || "{}") || {}; } catch (e) { running = {}; }
+    /* The live run: { title, note, seen, gone } while Hark works, else null. */
+    var live = null;
+    try { live = JSON.parse(sessionStorage.getItem("harkDesktopRun") || "null"); } catch (e) { live = null; }
     var stored = "";
     function remember() {
-      var next = JSON.stringify(running);
+      var next = JSON.stringify(running) + "|" + JSON.stringify(live && { title: live.title, seen: live.seen });
       if (next === stored) return;
       stored = next;
-      try { sessionStorage.setItem("harkDesktopPlans", next); } catch (e) { /* storage blocked */ }
+      try {
+        sessionStorage.setItem("harkDesktopPlans", JSON.stringify(running));
+        sessionStorage.setItem("harkDesktopRun", JSON.stringify(live));
+      } catch (e) { /* storage blocked */ }
+    }
+    function scanRun(now) {
+      var note = readRunNote();
+      if (note !== null) {
+        /* Titled once, when it starts: a message sent meanwhile doesn't rename it. */
+        if (!live) live = { title: runTitle(), note: "" };
+        live.note = note || live.note;
+        live.seen = now;
+        live.gone = 0;
+        return;
+      }
+      if (!live) return;
+      /* No pill. In the chat that means Hark has finished; elsewhere in Hark
+       * (no chat on screen) it may still be working, so wait for the chat. */
+      if (document.querySelector('[data-testid="message-list"]')) {
+        if (!live.gone) live.gone = now;
+        if (now - live.gone >= RUN_GONE_MS) {
+          emit("hark-plan-done", { title: live.title, total: 0, live: true });
+          live = null;
+        }
+      } else if (now - live.seen > PLAN_MEMORY) {
+        live = null;
+      }
     }
     function scan() {
       var now = Date.now();
+      scanRun(now);
       var onPage = {};
       readPlans().forEach(function (p) {
         var seen = onPage[p.title];
@@ -663,22 +720,25 @@
         active.push({ title: title, done: r.done, total: r.total });
         best = Math.max(best, Math.round((r.done / r.total) * 100));
       });
+      if (live && !running[live.title]) active.push({ title: live.title, done: 0, total: 0, live: true, note: live.note });
       remember();
       var sent = JSON.stringify(active);
       if (sent !== lastSent) {
         lastSent = sent;
         emit("hark-plans", { plans: active });
       }
-      if (best !== lastPct) {
-        lastPct = best;
-        emit("hark-progress", { value: best < 0 ? null : best });
+      var progress = (best < 0 ? "" : best) + "|" + !!live;
+      if (progress !== lastProgress) {
+        lastProgress = progress;
+        emit("hark-progress", { value: best < 0 ? null : best, busy: !!live });
       }
     }
-    /* Rescan when a plan's label changes or a plan appears, at most a few times a
-     * second; the slow timer catches anything missed and forgets old plans. */
+    /* Rescan when a plan's label changes, a plan appears or the narration moves
+     * on, at most a few times a second; the slow timer catches anything missed,
+     * ends a live run whose pill has gone, and forgets old plans. */
     var queued = null;
     function soon() { if (!queued) queued = setTimeout(function () { queued = null; scan(); }, 300); }
-    new MutationObserver(soon).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-label"] });
+    new MutationObserver(soon).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["aria-label"] });
     setInterval(scan, 5000);
     scan();
   }
@@ -871,7 +931,11 @@
     });
     on("hark-open-plan", function (ev) {
       var title = ev && ev.payload ? String(ev.payload.title || "") : "";
-      if (title && !openPlan(title)) { if (!clickAria("Chat")) location.assign("/chat"); }
+      if (!title || openPlan(title)) return;
+      /* A live run (or a plan whose card has gone): its outcome is at the end of the chat. */
+      var list = document.querySelector('[data-testid="message-list"]');
+      if (list) list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
+      else if (!clickAria("Chat")) location.assign("/chat");
     });
     on("hark-navigate", function (ev) {
       var target = ev && ev.payload ? ev.payload.target : "";

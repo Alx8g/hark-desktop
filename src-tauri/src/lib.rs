@@ -419,8 +419,9 @@ pub struct AppState {
     island_ok: AtomicBool,
     /* What the tray last showed, so unchanged updates are skipped. */
     tray_key: Mutex<String>,
-    /* The last taskbar progress, put back when Plan progress is turned on. */
-    last_progress: Mutex<Option<u64>>,
+    /* The last taskbar progress (percent, and busy with a live run), put
+     * back when Plan progress is turned on. */
+    last_progress: Mutex<(Option<u64>, bool)>,
     /* The last Hark (or sign-in) page that finished loading in the main window. */
     last_page: Mutex<Option<Url>>,
     /* What Hark's page was last told about being seen (sync_shell), -1 at first. */
@@ -526,12 +527,18 @@ fn load_appearance(app: &AppHandle) -> Appearance {
 
 /* ------------------------------ plan state ------------------------------ */
 
-/* One Handoff plan, as bridge.js reads it from Hark's own plan buttons. */
+/* One piece of work Hark is doing, as bridge.js reads it from Hark's page:
+ * a Handoff plan with steps, or a live run (Hark working on a request),
+ * which has no steps (total 0) but narrates what it is doing (note). */
 #[derive(Debug, Clone, Default, Deserialize)]
 struct PlanInfo {
     title: String,
     done: u64,
     total: u64,
+    #[serde(default)]
+    live: bool,
+    #[serde(default)]
+    note: String,
 }
 
 impl PlanInfo {
@@ -552,6 +559,8 @@ struct PlanView {
     done: u64,
     total: u64,
     others: usize,
+    live: bool,
+    note: String,
 }
 
 impl PlanView {
@@ -562,6 +571,8 @@ impl PlanView {
             done: 0,
             total: 0,
             others: 0,
+            live: false,
+            note: String::new(),
         }
     }
 }
@@ -576,24 +587,28 @@ struct Plans {
 }
 
 impl Plans {
-    /* The plan furthest along, or the one that just finished. The island
-     * leaves out a hidden plan; the tray icon still counts it. */
+    /* The plan furthest along (one with steps before a live run, at a tie),
+     * or the one that just finished. The island leaves out a hidden plan;
+     * the tray icon still counts it. */
     fn view(&self, include_hidden: bool) -> PlanView {
         let shown: Vec<&PlanInfo> = self
             .active
             .iter()
             .filter(|p| include_hidden || self.hidden.as_deref() != Some(p.title.as_str()))
             .collect();
-        if let Some(best) = shown
-            .iter()
-            .max_by(|a, b| a.fraction().total_cmp(&b.fraction()))
-        {
+        if let Some(best) = shown.iter().max_by(|a, b| {
+            a.fraction()
+                .total_cmp(&b.fraction())
+                .then((!a.live).cmp(&!b.live))
+        }) {
             return PlanView {
                 phase: "running",
                 title: best.title.clone(),
                 done: best.done,
                 total: best.total,
                 others: shown.len() - 1,
+                live: best.live,
+                note: best.note.clone(),
             };
         }
         match &self.finished {
@@ -603,6 +618,8 @@ impl Plans {
                 done: p.total,
                 total: p.total,
                 others: 0,
+                live: p.live,
+                note: String::new(),
             },
             None => PlanView::idle(),
         }
@@ -703,13 +720,17 @@ fn set_setting(app: AppHandle, key: String, value: bool) -> Result<(), String> {
         apply_autostart(&app, value);
     }
     if key == "taskbar_progress" {
-        let last = app
+        let (last, busy) = app
             .state::<AppState>()
             .last_progress
             .lock()
             .map(|v| *v)
-            .unwrap_or(None);
-        set_taskbar_progress(&app, if value { last } else { None });
+            .unwrap_or((None, false));
+        if value {
+            set_taskbar_progress(&app, last, busy);
+        } else {
+            set_taskbar_progress(&app, None, false);
+        }
         refresh_plans_soon(&app);
     }
     persist_settings(&app, &snapshot);
@@ -876,12 +897,17 @@ fn notify(app: &AppHandle, title: &str, body: &str, force: bool) {
     }
 }
 
-fn set_taskbar_progress(app: &AppHandle, value: Option<u64>) {
+/* A plan's steps fill the taskbar button; a live run alone shows it busy. */
+fn set_taskbar_progress(app: &AppHandle, value: Option<u64>, busy: bool) {
     if let Some(main) = app.get_webview_window("main") {
         let state = match value {
             Some(pct) => ProgressBarState {
                 status: Some(ProgressBarStatus::Normal),
                 progress: Some(pct.min(100)),
+            },
+            None if busy => ProgressBarState {
+                status: Some(ProgressBarStatus::Indeterminate),
+                progress: None,
             },
             None => ProgressBarState {
                 status: Some(ProgressBarStatus::None),
@@ -2248,8 +2274,9 @@ fn tray_icon(_plan: &PlanView, unread: bool) -> Option<Image<'static>> {
 }
 
 /* Windows and Linux show the coloured app tile. While a Handoff plan runs,
- * Hark's sky rises inside it as the steps finish; a finished plan fills it
- * with warm light; unread adds the orange dot. Stacked from the layers in
+ * Hark's sky rises inside it as the steps finish (part way for a live run,
+ * which has no steps); a finished plan fills it with warm light; unread adds
+ * the orange dot. Stacked from the layers in
  * icons/tray-layers (rendered by branding/build.mjs). */
 #[cfg(not(target_os = "macos"))]
 fn tray_icon(plan: &PlanView, unread: bool) -> Option<Image<'static>> {
@@ -2290,6 +2317,8 @@ fn tray_icon(plan: &PlanView, unread: bool) -> Option<Image<'static>> {
     let (w, h) = (layers.width as usize, layers.height as usize);
     let filled = match plan.phase {
         "done" => h,
+        // A live run has no steps to count: the sky stands part way up while Hark works.
+        "running" if plan.live => h * 2 / 5,
         // A running plan always shows a little sky, even before its first step.
         "running" if plan.total > 0 => {
             let rows = (plan.done as f64 / plan.total as f64 * h as f64).round() as usize;
@@ -2353,17 +2382,20 @@ fn clean_text(text: &str, max: usize) -> String {
     }
 }
 
-/* A plan as reported by the page, within limits the UI can draw. */
-fn clean_plan(title: &str, done: u64, total: u64) -> Option<PlanInfo> {
-    let title = clean_text(title, 120);
-    if title.is_empty() || total == 0 {
+/* A plan as reported by the page, within limits the UI can draw. Only a
+ * live run may have no steps. */
+fn clean_plan(plan: PlanInfo) -> Option<PlanInfo> {
+    let title = clean_text(&plan.title, 120);
+    if title.is_empty() || (plan.total == 0 && !plan.live) {
         return None;
     }
-    let total = total.min(64);
+    let total = plan.total.min(64);
     Some(PlanInfo {
         title,
-        done: done.min(total),
+        done: plan.done.min(total),
         total,
+        live: plan.live,
+        note: clean_text(&plan.note, 140),
     })
 }
 
@@ -2402,6 +2434,7 @@ fn update_tray(app: &AppHandle) {
     let title = short_title(&plan.title);
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let tooltip = match plan.phase {
+            "running" if plan.live => format!("Hark · {title}, working"),
             "running" => format!(
                 "Hark · {title}, step {} of {}",
                 plan.done.saturating_add(1).min(plan.total),
@@ -2448,6 +2481,7 @@ fn update_tray(app: &AppHandle) {
     if show_plan {
         let _ = plan_item.set_text(match plan.phase {
             "done" => format!("{title} · done"),
+            _ if plan.live => format!("{title} · working"),
             _ => format!("{title} · {} of {}", plan.done, plan.total),
         });
     }
@@ -2591,7 +2625,7 @@ fn install_bridge_listeners(app: &AppHandle) {
             .unwrap_or_default()
             .into_iter()
             .take(8)
-            .filter_map(|p| clean_plan(&p.title, p.done, p.total))
+            .filter_map(clean_plan)
             .collect();
         if let Ok(mut plans) = h.state::<AppState>().plans.lock() {
             // "Hide until it's done" ends if that plan stops running (cancelled).
@@ -2619,6 +2653,7 @@ fn install_bridge_listeners(app: &AppHandle) {
         let v = parse_payload(&event);
         let title = clean_text(v.get("title").and_then(Value::as_str).unwrap_or(""), 120);
         let total = v.get("total").and_then(Value::as_u64).unwrap_or(0).min(64);
+        let live = v.get("live").and_then(Value::as_bool).unwrap_or(false);
         let looking = main_in_front(&h);
         if let Ok(mut plans) = h.state::<AppState>().plans.lock() {
             if plans.hidden.as_deref() == Some(title.as_str()) {
@@ -2631,14 +2666,17 @@ fn install_bridge_listeners(app: &AppHandle) {
                     title: title.clone(),
                     done: total,
                     total,
+                    live,
+                    note: String::new(),
                 })
             };
         }
         // Where the island can't show it, a notification says which plan finished.
+        // A live run ends with Hark's reply, which has its own notification.
         let island = !cfg!(target_os = "linux")
             && settings_snapshot(&h).taskbar_progress
             && h.state::<AppState>().island_ok.load(Ordering::SeqCst);
-        if !looking && !island && !title.is_empty() {
+        if !looking && !island && !live && !title.is_empty() {
             notify(&h, "Plan finished", &title, false);
         }
         refresh_plans_soon(&h);
@@ -2648,12 +2686,13 @@ fn install_bridge_listeners(app: &AppHandle) {
     app.listen("hark-progress", move |event| {
         let v = parse_payload(&event);
         let value = v.get("value").and_then(Value::as_u64).map(|p| p.min(100));
+        let busy = v.get("busy").and_then(Value::as_bool).unwrap_or(false);
         // Kept even while Plan progress is off, to show at once when it is turned on.
         if let Ok(mut last) = h.state::<AppState>().last_progress.lock() {
-            *last = value;
+            *last = (value, busy);
         }
         if settings_snapshot(&h).taskbar_progress {
-            set_taskbar_progress(&h, value);
+            set_taskbar_progress(&h, value, busy);
         }
     });
 
@@ -2808,7 +2847,7 @@ pub fn run() {
             island_geo: Mutex::new(IslandGeo::default()),
             island_ok: AtomicBool::new(true),
             tray_key: Mutex::new(String::new()),
-            last_progress: Mutex::new(None),
+            last_progress: Mutex::new((None, false)),
             last_page: Mutex::new(None),
             shell_key: AtomicI64::new(-1),
         })
@@ -2967,6 +3006,8 @@ mod tests {
             done,
             total,
             others: 0,
+            live: false,
+            note: String::new(),
         }
     }
 
@@ -2996,6 +3037,18 @@ mod tests {
             dark(pixel(&half, HIGH.0, HIGH.1)),
             "half-way plan is still dark at the top"
         );
+    }
+
+    #[test]
+    fn live_run_raises_the_sky_part_way() {
+        let live = PlanView {
+            live: true,
+            ..running(0, 0)
+        };
+        let icon = tray_icon(&live, false).expect("icon");
+        let dark = |p: [u8; 4]| p[3] > 200 && p[2] < 110;
+        assert!(pixel(&icon, LOW.0, LOW.1)[2] > 180, "sky at the bottom");
+        assert!(dark(pixel(&icon, HIGH.0, HIGH.1)), "still dark at the top");
     }
 
     #[test]
@@ -3101,9 +3154,23 @@ mod tests {
     fn page_text_is_cleaned_and_plans_are_kept_drawable() {
         assert_eq!(clean_text("  Plan\u{202e}gnp.exe\n ", 120), "Plangnp.exe");
         assert_eq!(clean_text(&"x".repeat(200), 10).chars().count(), 10);
-        let plan = clean_plan("Big", 900, 100_000).expect("plan");
+        let steps = |title: &str, done, total| PlanInfo {
+            title: title.into(),
+            done,
+            total,
+            ..PlanInfo::default()
+        };
+        let plan = clean_plan(steps("Big", 900, 100_000)).expect("plan");
         assert_eq!((plan.done, plan.total), (64, 64));
-        assert!(clean_plan("", 1, 2).is_none() && clean_plan("x", 0, 0).is_none());
+        assert!(clean_plan(steps("", 1, 2)).is_none() && clean_plan(steps("x", 0, 0)).is_none());
+        // A live run has no steps, but its narration is kept short.
+        let live = clean_plan(PlanInfo {
+            live: true,
+            note: "n".repeat(500),
+            ..steps("Plan a trip", 0, 0)
+        })
+        .expect("live run");
+        assert!(live.live && live.total == 0 && live.note.chars().count() == 140);
     }
 
     #[test]
@@ -3201,6 +3268,7 @@ mod tests {
             title: title.into(),
             done,
             total,
+            ..PlanInfo::default()
         };
         let mut plans = Plans {
             active: vec![plan("Slow", 1, 8), plan("Quick", 3, 4)],
@@ -3218,5 +3286,43 @@ mod tests {
         assert_eq!(plans.view(false).phase, "idle");
         plans.finished = Some(plan("Quick", 4, 4));
         assert_eq!(plans.view(false).phase, "done");
+    }
+
+    #[test]
+    fn island_shows_a_live_run_but_prefers_a_plan_with_steps() {
+        let live = PlanInfo {
+            title: "Plan a trip".into(),
+            live: true,
+            note: "Reading a page".into(),
+            ..PlanInfo::default()
+        };
+        let steps = |done| PlanInfo {
+            title: "Steps".into(),
+            done,
+            total: 4,
+            ..PlanInfo::default()
+        };
+        let mut plans = Plans {
+            active: vec![live.clone()],
+            ..Plans::default()
+        };
+        let view = plans.view(false);
+        assert!(view.live && view.phase == "running" && view.note == "Reading a page");
+        plans.active = vec![steps(0), live.clone()];
+        assert_eq!(
+            plans.view(false).title,
+            "Steps",
+            "a tie goes to the plan with steps"
+        );
+        plans.active = vec![live.clone(), steps(2)];
+        let view = plans.view(false);
+        assert_eq!(
+            (view.title.as_str(), view.others, view.live),
+            ("Steps", 1, false)
+        );
+        plans.active.clear();
+        plans.finished = Some(live);
+        let view = plans.view(false);
+        assert!(view.phase == "done" && view.live && view.note.is_empty());
     }
 }
