@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Hark Desktop: Hark in its own window</title>
-    <meta name="description" content="An unofficial, lightweight desktop app for Hark on Windows, macOS and Linux. Tray icon, native notifications and a shortcut that works from anywhere. Open source." />
+    <meta name="description" content="An unofficial, lightweight desktop app for Hark on Windows, macOS and Linux. Tray icon, native notifications, live Handoff plan progress and a shortcut that works from anywhere. Open source." />
     <meta name="theme-color" content="#141414" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Hark Desktop" />
@@ -41,7 +41,7 @@
         <p class="fine" data-reveal="3">Free, open source and unofficial. Not affiliated with Hark.</p>
 
         <div class="stage" id="stage">
-          <div class="panel sky-dusk" role="img" aria-label="The Hark Desktop window showing a chat, with a desktop notification in the corner">
+          <div class="panel sky-dusk" role="img" aria-label="The Hark Desktop window showing a chat, with a running Handoff plan in a small island at the top of the screen">
             <div class="win sky-day">
               <div class="caption">
                 <span><svg viewBox="0 0 16 16" fill="none" stroke="#1d1d1f" stroke-width="1.6" stroke-linecap="round"><path d="M3 8h10" /></svg></span>
@@ -55,7 +55,7 @@
                 <div class="composer">Ask Hark anything<i><svg viewBox="0 0 16 16" fill="none" stroke="#f9f9fa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" /></svg></i></div>
               </div>
             </div>
-            <div class="toast"><span class="tile"></span><div><b>Hark finished</b><span>Sort this week's receipts</span></div></div>
+            <div class="island"><span class="ring"><svg viewBox="0 0 42 42" fill="none"><circle cx="21" cy="21" r="19" stroke="rgba(255,255,255,.16)" stroke-width="2.5" /><circle cx="21" cy="21" r="19" stroke="#7fb0dd" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="72 200" /></svg><span class="tile"></span></span><span>Sort this week's receipts</span><small>3 of 5</small></div>
           </div>
         </div>
       </section>
@@ -63,42 +63,43 @@
       <section class="block" id="features">
         <div class="copy" data-reveal>
           <h2>Ask from anywhere</h2>
-          <p>Press <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>H</kbd> (<kbd>Cmd</kbd> <kbd>Shift</kbd> <kbd>H</kbd> on a Mac) and a small box opens over whatever you are doing.</p>
+          <p>Press <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>H</kbd> (<kbd>Cmd</kbd> <kbd>Shift</kbd> <kbd>H</kbd> on a Mac) and a little piece of Hark's sky opens near the top of your screen, over whatever you are doing.</p>
           <p>Type, press Enter, and Hark opens with your question drafted. It never sends for you.</p>
         </div>
-        <div class="panel sky-dusk" data-reveal="2" role="img" aria-label="The quick ask box, opened with the Ctrl, Shift and H keys">
+        <div class="panel sky-dusk" data-reveal="2" role="img" aria-label="Quick ask, opened with the Ctrl, Shift and H keys: a small panel of Hark's sky with a greeting and a message bar">
           <div class="abs ghost g1"></div>
           <div class="abs ghost g2"></div>
           <div class="keys"><span class="key">Ctrl</span><span class="key">Shift</span><span class="key">H</span></div>
-          <div class="abs qa glass">
-            <div class="q">What is on my plate today?</div>
-            <div class="hint"><span>Enter opens Hark with this drafted</span><span class="send"><svg viewBox="0 0 16 16" fill="none" stroke="#f9f9fa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" /></svg></span></div>
+          <div class="abs little sky-day">
+            <div class="hello">Good morning. <i>What's first?</i></div>
+            <div class="lbar"><span class="q">What is on my plate today?</span><span class="send"><svg viewBox="0 0 16 16" fill="none" stroke="#f9f9fa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" /></svg></span></div>
           </div>
         </div>
       </section>
 
       <section class="block flip">
-        <div class="panel sky-day" data-reveal role="img" aria-label="The tray menu: Open Hark, Ask Hark, Latest brief, Projects, Desktop settings, Open hark.com in browser, Quit Hark">
+        <div class="panel sky-day" data-reveal role="img" aria-label="The tray menu: Open Hark, Ask Hark, a running plan, Today's brief, Projects, Settings, Open hark.com in your browser, Quit Hark. The tray icon is filling with sky as the plan runs">
           <div class="abs tray-label">Always one click away.</div>
           <div class="abs menu">
-            <div class="hot">Open Hark</div>
+            <div class="hot">Open Hark <span>2 unread</span></div>
             <div>Ask Hark <span>Ctrl+Shift+H</span></div>
-            <div>Latest brief</div>
+            <hr />
+            <div><b>Sort this week's receipts</b> <span>3 of 5</span></div>
+            <hr />
+            <div>Today's brief</div>
             <div>Projects</div>
             <hr />
-            <div>Desktop settings <span>Ctrl+,</span></div>
-            <div>Open hark.com in browser</div>
-            <hr />
+            <div>Settings <span>Ctrl+,</span></div>
             <div>Quit Hark</div>
           </div>
           <div class="abs taskbar">
             <div class="tb-apps"><span class="tb-app on"></span><span class="tb-app"></span><span class="tb-app"></span><span class="tb-app"></span></div>
-            <div class="tb-tray"><span class="tb-dot"></span><span class="tb-dot"></span><span class="tray-icon"><span class="tile"></span></span></div>
+            <div class="tb-tray"><span class="tb-dot"></span><span class="tb-dot"></span><span class="tray-icon filling"><span class="tile"></span></span></div>
           </div>
         </div>
         <div class="copy" data-reveal="2">
           <h2>Waiting in your tray</h2>
-          <p>Closing the window hides Hark instead of quitting, so it is back in a blink. An orange dot shows when something is unread.</p>
+          <p>Closing the window hides Hark instead of quitting, so it is back in a blink. An orange dot shows when something is unread, and while a plan runs Hark's sky fills the icon.</p>
           <p>On macOS it lives in the menu bar. On Linux it quits when you close it, unless you turn on the tray in settings.</p>
         </div>
       </section>
@@ -106,13 +107,13 @@
       <section class="block">
         <div class="copy" data-reveal>
           <h2>Told the moment it is done</h2>
-          <p>You get a notification when Hark replies, or when a Handoff plan you were watching finishes. Your own messages never notify.</p>
-          <p>Plan progress shows on the taskbar icon, like a download. Three of eight steps reads as 38%.</p>
+          <p>You get a notification when Hark replies. Your own messages never notify.</p>
+          <p>While a Handoff plan runs, a small island at the top of your screen shows each step, then tucks away into a thin line of sky. When the plan is done it says so, with Open.</p>
         </div>
-        <div class="panel sky-coral" data-reveal="2" role="img" aria-label="Two desktop notifications from Hark, and the app icon on the taskbar showing 3 of 8 steps done">
-          <div class="toast t1"><span class="tile"></span><div><b>Hark finished</b><span>Book the Lisbon trip</span></div></div>
+        <div class="panel sky-coral told" data-reveal="2" role="img" aria-label="The plan island showing step 4 of 8, a notification for a reply from Hark, and the island saying a plan is done">
+          <div class="island-card"><div class="ic-top"><span class="ring"><svg viewBox="0 0 42 42" fill="none"><circle cx="21" cy="21" r="19" stroke="rgba(255,255,255,.16)" stroke-width="2.5" /><circle cx="21" cy="21" r="19" stroke="#7fb0dd" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="48 200" /></svg><span class="tile"></span></span><div><b>Sort this week's receipts</b><small>Step 4 of 8</small></div></div><div class="segs"><i class="d"></i><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i></div></div>
           <div class="toast t2"><span class="tile"></span><div><b>Hark</b><span>Your Thursday is light. One call at 10:30.</span></div></div>
-          <div class="abs progress glass"><span class="tile"></span><div class="txt">Hark<small>3 of 8 steps</small><div class="bar"></div></div></div>
+          <div class="island-done"><span class="tick"><svg viewBox="0 0 14 14" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4 5.8 10 11 4" /></svg></span><div><b>Book the Lisbon trip</b><small>Done · all 8 steps finished</small></div><em>Open</em></div>
         </div>
       </section>
 
