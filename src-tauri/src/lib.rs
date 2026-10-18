@@ -421,9 +421,10 @@ pub struct AppState {
     tray_key: Mutex<String>,
     /* The last taskbar progress, put back when Plan progress is turned on. */
     last_progress: Mutex<Option<u64>>,
-    /* Whether WebView2 has been told Hark's page is on screen (set_page_visible). */
-    #[cfg(windows)]
-    page_visible: AtomicBool,
+    /* The last Hark (or sign-in) page that finished loading in the main window. */
+    last_page: Mutex<Option<Url>>,
+    /* What Hark's page was last told about being seen (sync_shell), -1 at first. */
+    shell_key: AtomicI64,
 }
 
 /* Where the island window is, in the same units as the pointer: physical
@@ -906,45 +907,49 @@ fn show_main(app: &AppHandle) {
     show_main_now(app);
 }
 
-/* A hidden or minimized window keeps painting at full speed unless WebView2
- * is told: Hark's animated sky would keep a core and the GPU busy all day in
- * the tray. Told "not visible", the page stops drawing but stays connected, so
- * messages, notifications and plans carry on. macOS and Linux do this
- * themselves. */
-#[cfg(windows)]
-fn set_page_visible(app: &AppHandle, visible: bool) {
+/* Tell Hark's page whether you can see it ("rest") and whether you are using
+ * it ("front"). At rest, bridge.js pauses Hark's animations, so the animated
+ * sky costs next to nothing in the tray, while the page stays fully awake for
+ * messages, notifications and plans. (Hiding the page from WebView2 instead
+ * makes it stall for minutes at a time.) "front" decides notifications: the
+ * page can't tell for itself, as WebView2 reports focus to a hidden window. */
+fn sync_shell(app: &AppHandle, force: bool) {
+    let Some(main) = app.get_webview_window("main") else {
+        return;
+    };
+    let shown = main.is_visible().unwrap_or(false) && !main.is_minimized().unwrap_or(false);
+    let front = shown && main.is_focused().unwrap_or(false);
+    let key = i64::from(shown) | (i64::from(front) << 1);
     if app
         .state::<AppState>()
-        .page_visible
-        .swap(visible, Ordering::SeqCst)
-        == visible
+        .shell_key
+        .swap(key, Ordering::SeqCst)
+        == key
+        && !force
     {
         return;
     }
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.with_webview(move |webview| unsafe {
-            let _ = webview.controller().SetIsVisible(visible);
-        });
-    }
+    let _ = app.emit_to(
+        "main",
+        "hark-shell",
+        json!({ "rest": !shown, "front": front }),
+    );
 }
 
-#[cfg(not(windows))]
-fn set_page_visible(_app: &AppHandle, _visible: bool) {}
-
 fn show_main_now(app: &AppHandle) {
-    set_page_visible(app, true);
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.unminimize();
         let _ = main.show();
         let _ = main.set_focus();
         let _ = main.request_user_attention(None);
     }
+    sync_shell(app, false);
 }
 
 /* Closing the window keeps Hark in the tray. The first time, say so. */
 fn hide_to_tray(app: &AppHandle, main: &WebviewWindow) {
     let _ = main.hide();
-    set_page_visible(app, false);
+    sync_shell(app, false);
     if let Ok(store) = app.store(STORE_FILE) {
         if store.get("told_about_tray").and_then(|v| v.as_bool()) == Some(true) {
             return;
@@ -966,7 +971,7 @@ fn toggle_main(app: &AppHandle) {
         let focused = main.is_focused().unwrap_or(false);
         if visible && focused {
             let _ = main.hide();
-            set_page_visible(app, false);
+            sync_shell(app, false);
         } else {
             show_main(app);
         }
@@ -1455,6 +1460,19 @@ fn pointer(app: &AppHandle) -> Option<(f64, f64)> {
     app.cursor_position().ok().map(|p| (p.x, p.y))
 }
 
+/* Whether the pointer is over the pill. The pill hangs from the top of the
+ * screen, so the gap between the screen edge and the pill counts as the pill:
+ * pointing at the very edge opens it, and it stays open while the pointer is
+ * anywhere between the edge and its bottom. A tucked pill is a few pixels
+ * tall, so the edge gets a little more. */
+fn over_pill(geo: &IslandGeo, rect: &IslandRect, px: f64, py: f64) -> bool {
+    let (px, py) = (px / geo.cursor_scale, py / geo.cursor_scale);
+    let left = geo.x + rect.x * geo.rect_scale;
+    let right = left + rect.w * geo.rect_scale;
+    let bottom = geo.y + ((rect.y + rect.h) * geo.rect_scale).max(8.0 * geo.rect_scale);
+    px >= left && px <= right && py >= geo.y - 1.0 && py <= bottom
+}
+
 /* The island window lets every click through except on the pill itself. A
  * see-through window can't feel the mouse while it ignores it, so this
  * watches the pointer instead: it tells the page when the pointer is over the
@@ -1517,14 +1535,7 @@ fn watch_island_pointer(app: AppHandle) {
                 };
             }
             if let Some((px, py)) = pointer(&app) {
-                let (px, py) = (px / geo.cursor_scale, py / geo.cursor_scale);
-                let left = geo.x + rect.x * geo.rect_scale;
-                let top = geo.y + rect.y * geo.rect_scale;
-                let width = rect.w * geo.rect_scale;
-                // A tucked pill is a few pixels tall: give the screen edge a little more.
-                let height = (rect.h * geo.rect_scale).max(8.0 * geo.rect_scale);
-                let now_inside =
-                    px >= left && px <= left + width && py >= top && py <= top + height;
+                let now_inside = over_pill(&geo, &rect, px, py);
                 if now_inside != inside {
                     inside = now_inside;
                     let _ = app.emit_to("island", "island-pointer", json!({ "inside": inside }));
@@ -1583,6 +1594,32 @@ fn in_app_page(url: &Url) -> bool {
             .host_str()
             .map(|h| IN_APP_HOSTS.contains(&h) || h.ends_with(".hark.com"))
             .unwrap_or(false)
+}
+
+/* What happens to a navigation in Hark's window. Windows reports only the
+ * page's own navigations here. macOS and Linux report every frame inside the
+ * page too (an embedded video, say), with nothing to tell them apart, so
+ * there a web address is let through: if it turns out to be the page itself
+ * leaving Hark, on_page_load catches it when it starts loading. */
+#[derive(Debug, PartialEq, Eq)]
+enum Nav {
+    Allow,
+    OpenOutside,
+    Block,
+}
+
+const FRAMES_REPORTED: bool = !cfg!(windows);
+
+fn navigation(url: &Url, frames_reported: bool) -> Nav {
+    if host_allowed(url) {
+        Nav::Allow
+    } else if !frames_reported {
+        Nav::OpenOutside
+    } else if matches!(url.scheme(), "http" | "https") {
+        Nav::Allow
+    } else {
+        Nav::Block
+    }
 }
 
 /* Top-level navigation in the main window: an in-app page, the browser's own
@@ -1672,6 +1709,49 @@ fn default_window_size(app: &AppHandle) -> (f64, f64) {
 
 /* Where the main window will open, read from the window-state plugin's file
  * before the main window exists. Ignored if it is no longer on any screen. */
+/* A window rectangle (x, y, width, height) moved, and shrunk if it must be,
+ * to sit wholly inside a screen's work area (also x, y, width, height). */
+fn fit_rect(area: (i32, i32, u32, u32), window: (i32, i32, u32, u32)) -> (i32, i32, u32, u32) {
+    let (ax, ay, aw, ah) = area;
+    let (x, y, w, h) = window;
+    let (w, h) = (w.min(aw), h.min(ah));
+    let max_x = ax + i32::try_from(aw - w).unwrap_or(0);
+    let max_y = ay + i32::try_from(ah - h).unwrap_or(0);
+    (x.clamp(ax, max_x), y.clamp(ay, max_y), w, h)
+}
+
+fn work_area(monitor: &tauri::Monitor) -> (i32, i32, u32, u32) {
+    let area = monitor.work_area();
+    (
+        area.position.x,
+        area.position.y,
+        area.size.width,
+        area.size.height,
+    )
+}
+
+/* A restored window can hang off the screen (moved there, or saved on a
+ * bigger screen). Hark's window controls are at the top right on Windows, so
+ * keep the whole window on the screen it is mostly on. */
+fn keep_on_screen(window: &WebviewWindow) {
+    if window.is_maximized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false) {
+        return;
+    }
+    let (Ok(pos), Ok(size), Ok(Some(monitor))) = (
+        window.outer_position(),
+        window.outer_size(),
+        window.current_monitor(),
+    ) else {
+        return;
+    };
+    let now = (pos.x, pos.y, size.width, size.height);
+    let fitted = fit_rect(work_area(&monitor), now);
+    if fitted != now {
+        let _ = window.set_size(tauri::PhysicalSize::new(fitted.2, fitted.3));
+        let _ = window.set_position(PhysicalPosition::new(fitted.0, fitted.1));
+    }
+}
+
 fn saved_main_bounds(
     app: &AppHandle,
 ) -> Option<(PhysicalPosition<i32>, tauri::PhysicalSize<u32>, bool)> {
@@ -1700,8 +1780,10 @@ fn saved_main_bounds(
         let scale = app.primary_monitor().ok().flatten()?.scale_factor();
         centre = (centre.0 / scale, centre.1 / scale);
     }
-    app.monitor_from_point(centre.0, centre.1).ok().flatten()?;
+    let monitor = app.monitor_from_point(centre.0, centre.1).ok().flatten()?;
     let maximized = main.get("maximized").and_then(Value::as_bool) == Some(true);
+    // The loading screen opens where Hark will, kept on screen the same way.
+    let (x, y, width, height) = fit_rect(work_area(&monitor), (x, y, width, height));
     Some((
         PhysicalPosition::new(x, y),
         tauri::PhysicalSize::new(width, height),
@@ -1730,7 +1812,7 @@ fn reveal_main(app: &AppHandle) {
             let _ = splash.close();
         }
         // Started in the tray (at sign-in, say): loaded and painted, now rest.
-        set_page_visible(app, false);
+        sync_shell(app, false);
         return;
     }
     let Some(splash) = splash.filter(|s| s.is_visible().unwrap_or(false)) else {
@@ -1802,13 +1884,13 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
     .visible(false)
     .focused(true)
     .initialization_script(bridge)
-    .on_navigation(move |url: &Url| {
-        if host_allowed(url) {
-            true
-        } else {
+    .on_navigation(move |url: &Url| match navigation(url, FRAMES_REPORTED) {
+        Nav::Allow => true,
+        Nav::OpenOutside => {
             open_external(&nav_app, url.as_str());
             false
         }
+        Nav::Block => false,
     })
     .on_new_window(move |url: Url, _features| {
         if in_app_page(&url) {
@@ -1828,6 +1910,29 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
         let app = window.app_handle().clone();
         let state = app.state::<AppState>();
         let finished = payload.event() == tauri::webview::PageLoadEvent::Finished;
+        let url = payload.url().clone();
+        // The page itself is leaving Hark (macOS and Linux let it through
+        // navigation(), see there): open it in the browser and go back.
+        if !host_allowed(&url) && matches!(url.scheme(), "http" | "https") {
+            if !finished {
+                open_external(&app, url.as_str());
+                let back = state
+                    .last_page
+                    .lock()
+                    .ok()
+                    .and_then(|p| p.clone())
+                    .or_else(|| Url::parse(HARK_URL).ok());
+                if let Some(back) = back {
+                    let _ = window.navigate(back);
+                }
+            }
+            return;
+        }
+        if finished && host_allowed(&url) && url.scheme() == "https" {
+            if let Ok(mut last) = state.last_page.lock() {
+                *last = Some(url.clone());
+            }
+        }
         state.page_finished.store(finished, Ordering::SeqCst);
         if !finished {
             state.page_ok.store(false, Ordering::SeqCst);
@@ -1897,12 +2002,19 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
     let window = builder.build()?;
     polish_frame(&window);
     hold_corners(&window);
+    keep_on_screen(&window);
     // Hark in front: hide the plan island, and a finished plan counts as seen.
     let focus_app = app.clone();
     window.on_window_event(move |event| match event {
         WindowEvent::Focused(focused) => {
-            if *focused {
-                set_page_visible(&focus_app, true);
+            // WebView2 reports focus even to a hidden window (started in the
+            // tray, say): only a window really on screen counts as seen.
+            let on_screen = focus_app
+                .get_webview_window("main")
+                .map(|m| m.is_visible().unwrap_or(false) && !m.is_minimized().unwrap_or(false))
+                .unwrap_or(false);
+            sync_shell(&focus_app, false);
+            if *focused && on_screen {
                 if let Ok(mut plans) = focus_app.state::<AppState>().plans.lock() {
                     plans.finished = None;
                 }
@@ -1910,15 +2022,7 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
             refresh_plans_soon(&focus_app);
         }
         // Minimized, or back from it (the taskbar button, Win+D...).
-        WindowEvent::Resized(_) => {
-            if let Some(main) = focus_app.get_webview_window("main") {
-                if main.is_minimized().unwrap_or(false) {
-                    set_page_visible(&focus_app, false);
-                } else if main.is_visible().unwrap_or(false) {
-                    set_page_visible(&focus_app, true);
-                }
-            }
-        }
+        WindowEvent::Resized(_) => sync_shell(&focus_app, false),
         _ => {}
     });
     start_refresh_worker(app);
@@ -2401,6 +2505,12 @@ fn install_bridge_listeners(app: &AppHandle) {
     let h = app.clone();
     app.listen("hark-ready", move |_event| {
         h.state::<AppState>().page_ok.store(true, Ordering::SeqCst);
+        // A page that has just loaded knows nothing yet: tell it, once it listens.
+        let told = h.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(400));
+            sync_shell(&told, true);
+        });
         let h = h.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(8));
@@ -2675,8 +2785,8 @@ pub fn run() {
             island_ok: AtomicBool::new(true),
             tray_key: Mutex::new(String::new()),
             last_progress: Mutex::new(None),
-            #[cfg(windows)]
-            page_visible: AtomicBool::new(true),
+            last_page: Mutex::new(None),
+            shell_key: AtomicI64::new(-1),
         })
         .invoke_handler(tauri::generate_handler![
             get_settings,
@@ -2970,6 +3080,78 @@ mod tests {
         let plan = clean_plan("Big", 900, 100_000).expect("plan");
         assert_eq!((plan.done, plan.total), (64, 64));
         assert!(clean_plan("", 1, 2).is_none() && clean_plan("x", 0, 0).is_none());
+    }
+
+    #[test]
+    fn pointing_anywhere_from_the_screen_edge_to_the_pill_counts() {
+        let geo = IslandGeo {
+            x: 700.0,
+            y: 0.0,
+            rect_scale: 1.0,
+            cursor_scale: 1.0,
+        };
+        // Open pill: 430 wide, hanging 10 px below the screen edge.
+        let open = IslandRect {
+            x: 45.0,
+            y: 10.0,
+            w: 430.0,
+            h: 120.0,
+            solid: true,
+        };
+        assert!(
+            over_pill(&geo, &open, 960.0, 2.0),
+            "the edge above the pill"
+        );
+        assert!(over_pill(&geo, &open, 960.0, 60.0), "the pill itself");
+        assert!(!over_pill(&geo, &open, 960.0, 140.0), "below the pill");
+        assert!(!over_pill(&geo, &open, 700.0, 30.0), "beside the pill");
+        // Tucked pill: a few pixels at the very top.
+        let tucked = IslandRect {
+            x: 92.0,
+            y: 0.0,
+            w: 336.0,
+            h: 5.0,
+            solid: false,
+        };
+        assert!(over_pill(&geo, &tucked, 960.0, 0.0));
+        assert!(over_pill(&geo, &tucked, 960.0, 7.0));
+        assert!(!over_pill(&geo, &tucked, 960.0, 20.0));
+        // At 150%, page pixels become 1.5 screen pixels.
+        let scaled = IslandGeo {
+            rect_scale: 1.5,
+            ..geo
+        };
+        assert!(over_pill(&scaled, &open, 700.0 + 45.0 * 1.5 + 5.0, 150.0));
+    }
+
+    #[test]
+    fn embedded_frames_never_open_the_browser() {
+        let url = |s: &str| Url::parse(s).expect("url");
+        let video = url("https://www.youtube.com/embed/abc");
+        // Windows sees only the page: leaving Hark opens the browser.
+        assert_eq!(navigation(&video, false), Nav::OpenOutside);
+        // macOS and Linux see frames too: let it load (a real page change is caught on load).
+        assert_eq!(navigation(&video, true), Nav::Allow);
+        assert_eq!(navigation(&url("https://hark.com/chat"), true), Nav::Allow);
+        assert_eq!(navigation(&url("https://hark.com/chat"), false), Nav::Allow);
+        assert_eq!(navigation(&url("file:///C:/x"), true), Nav::Block);
+        assert_eq!(navigation(&url("ms-settings:privacy"), true), Nav::Block);
+    }
+
+    #[test]
+    fn windows_are_kept_inside_the_screen() {
+        let area = (0, 0, 1920, 1032);
+        // Hanging off the right and bottom: moved back in, size kept.
+        assert_eq!(fit_rect(area, (594, 269, 1507, 949)), (413, 83, 1507, 949));
+        // Already inside: unchanged.
+        assert_eq!(fit_rect(area, (100, 100, 800, 600)), (100, 100, 800, 600));
+        // Bigger than the screen: shrunk to it.
+        assert_eq!(fit_rect(area, (-50, -50, 2560, 1440)), (0, 0, 1920, 1032));
+        // A second screen to the left.
+        assert_eq!(
+            fit_rect((-1920, 0, 1920, 1080), (-100, 10, 800, 600)),
+            (-800, 10, 800, 600)
+        );
     }
 
     #[test]
