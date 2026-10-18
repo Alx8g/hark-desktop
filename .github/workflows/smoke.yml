@@ -1,0 +1,105 @@
+name: Smoke test
+
+# Install a published release on GitHub's macOS and Linux machines, open it, and keep screenshots and the
+# app's log as run artifacts. Nobody signs in: it shows the loading screen, then hark.com's sign-in page.
+# Run it by hand from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release to test, for example v0.2.1
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download the disk image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern "*_universal.dmg" --dir dl
+
+      - name: Install
+        run: |
+          hdiutil attach dl/*.dmg -mountpoint /Volumes/hark -nobrowse -quiet
+          cp -R /Volumes/hark/*.app /Applications/
+          hdiutil detach /Volumes/hark -quiet
+          # Not notarised: what "right click, Open" does for a person.
+          xattr -cr /Applications/Hark.app
+          ls /Applications/Hark.app/Contents/MacOS
+
+      - name: Open it and take screenshots
+        run: |
+          mkdir -p out
+          bin=$(ls /Applications/Hark.app/Contents/MacOS/* | head -1)
+          "$bin" > out/app.log 2>&1 &
+          echo $! > out/pid
+          for t in 2 6 12 25 40; do
+            sleep $(( t - ${last:-0} )); last=$t
+            screencapture -x "out/after-${t}s.png" || true
+          done
+          if kill -0 "$(cat out/pid)" 2>/dev/null; then echo "still running after 40 s" | tee out/result.txt; else echo "EXITED" | tee out/result.txt; fi
+          # Window list, through the system's own records (no accessibility permission needed).
+          python3 -m venv /tmp/q && /tmp/q/bin/pip install -q pyobjc-framework-Quartz
+          /tmp/q/bin/python - <<'EOF' | tee out/windows.txt
+          import Quartz
+          for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID):
+              if w.get("kCGWindowOwnerName", "").lower().startswith("hark"):
+                  b = w.get("kCGWindowBounds", {})
+                  print(w.get("kCGWindowOwnerName"), "|", w.get("kCGWindowName", ""), "|", int(b.get("Width", 0)), "x", int(b.get("Height", 0)), "at", int(b.get("X", 0)), int(b.get("Y", 0)), "| layer", w.get("kCGWindowLayer"))
+          EOF
+          grep -q "still running" out/result.txt
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-macos
+          path: out/
+
+  linux:
+    name: Linux
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Download the deb
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern "*_amd64.deb" --dir dl
+
+      - name: Install it, a virtual screen and a window manager
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq ./dl/*.deb xvfb openbox imagemagick x11-utils dbus-x11 at-spi2-core
+
+      - name: Open it and take screenshots
+        run: |
+          mkdir -p out
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1600x1000x24 & sleep 2
+          openbox & sleep 1
+          bin=$(dpkg -L hark | grep -E '^/usr/bin/' | head -1)
+          # A virtual screen has no GPU: WebKitGTK's usual advice for VMs.
+          export WEBKIT_DISABLE_DMABUF_RENDERER=1
+          echo "binary: $bin"
+          dbus-run-session -- "$bin" > out/app.log 2>&1 &
+          echo $! > out/pid
+          for t in 2 6 12 25 40; do
+            sleep $(( t - ${last:-0} )); last=$t
+            import -window root "out/after-${t}s.png" || true
+          done
+          if kill -0 "$(cat out/pid)" 2>/dev/null; then echo "still running after 40 s" | tee out/result.txt; else echo "EXITED" | tee out/result.txt; fi
+          xwininfo -root -tree | grep -i hark | tee out/windows.txt || true
+          grep -q "still running" out/result.txt
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-linux
+          path: out/
