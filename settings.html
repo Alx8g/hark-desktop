@@ -3,30 +3,41 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Hark Settings</title>
+    <title>Hark Desktop settings</title>
     <link rel="stylesheet" href="/src/shell.css" />
     <style>
       body { display: flex; flex-direction: column; }
       header { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 8px; }
       header h1 { font: 400 24px/1 var(--serif); letter-spacing: -0.02em; }
-      header h1 em { font-style: italic; color: rgba(29, 29, 31, 0.45); }
+      header h1 em { font-style: italic; color: var(--text-3); }
       main { padding: 8px 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
       .group { padding: 6px 16px; }
       .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; }
-      .row + .row { border-top: 1px solid rgba(29,29,31,.07); }
+      .row + .row { border-top: 1px solid var(--row-line); }
       .row b { font-size: 14px; font-weight: 560; display: block; }
-      .row span { font-size: 12.5px; color: var(--ink-50); display: block; margin-top: 2px; line-height: 1.35; }
-      .switch { position: relative; flex: none; width: 46px; height: 28px; border-radius: 999px; background: rgba(29,29,31,.18); border: 0; cursor: pointer; transition: background .25s var(--ease); }
-      .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); transition: transform .25s var(--ease); }
-      .switch[aria-checked="true"] { background: var(--ink); }
+      .row > div > span { font-size: 12.5px; color: var(--text-2); display: block; margin-top: 2px; line-height: 1.35; }
+      .switch { position: relative; flex: none; width: 46px; height: 28px; border-radius: 999px; background: var(--btn-off-bg); box-shadow: inset 0 0 0 1px var(--glass-stroke); border: 0; cursor: pointer; transition: background .25s var(--ease); }
+      .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); transition: transform .25s var(--ease), background .25s var(--ease); }
+      .switch[aria-checked="true"] { background: var(--btn-bg); box-shadow: none; }
       .switch[aria-checked="true"]::after { transform: translateX(18px); }
-      kbd { font: inherit; font-size: 11.5px; font-weight: 500; background: rgba(255,255,255,.7); border: 1px solid var(--stroke); border-bottom-width: 2px; border-radius: 6px; padding: 2px 6px; }
-      .keys { font-size: 12.5px; color: var(--ink-70); line-height: 1.9; }
+      html[data-theme="dark"] .switch[aria-checked="true"]::after { background: #1d1d1f; }
+      .switch:focus-visible { outline: 2px solid #7fb0dd; outline-offset: 2px; }
+      kbd { font: inherit; font-size: 11.5px; font-weight: 500; color: var(--text); background: var(--glass); border: 1px solid var(--glass-stroke); border-bottom-width: 2px; border-radius: 6px; padding: 2px 6px; }
+      .keys { font-size: 12.5px; color: var(--text-2); line-height: 1.9; }
       .keys > div { display: flex; align-items: center; gap: 12px; }
       .combo { flex: none; width: 138px; white-space: nowrap; }
-      .keys .tip { margin-top: 4px; color: var(--ink-50); }
+      .keys .tip { margin-top: 4px; }
       footer { padding: 0 18px 12px; display: flex; gap: 8px; flex-wrap: wrap; }
-      .version { font-size: 12px; color: var(--ink-50); padding: 0 18px 14px; }
+      .version { font-size: 12px; color: var(--text-2); padding: 0 18px 14px; }
+      html[data-theme="dark"] header h1, html[data-theme="dark"] .version { text-shadow: 0 1px 12px rgba(0, 0, 0, 0.35); }
+      /* Windows high contrast: draw the switches in the system's colours. */
+      @media (forced-colors: active) {
+        .switch { forced-color-adjust: none; background: Canvas; box-shadow: none; border: 1px solid ButtonText; }
+        .switch::after { background: ButtonText; box-shadow: none; }
+        .switch[aria-checked="true"] { background: Highlight; border-color: Highlight; }
+        .switch[aria-checked="true"]::after { background: HighlightText; }
+        kbd { border-color: ButtonText; }
+      }
     </style>
   </head>
   <body>
@@ -36,15 +47,15 @@
     </header>
     <main>
       <section class="card group" aria-label="General">
-        <div class="row"><div><b id="autostart-title">Start with Windows</b><span id="autostart-help">Hark waits in the tray from sign-in, so your morning brief can find you.</span></div><button class="switch" id="autostart" role="switch" aria-checked="true" aria-labelledby="autostart-title"></button></div>
-        <div class="row"><div><b id="tray-title">Keep running in tray</b><span id="tray-help">Closing the window hides Hark instead of quitting. Quit from the tray icon.</span></div><button class="switch" id="tray" role="switch" aria-checked="true" aria-labelledby="tray-title"></button></div>
-        <div class="row"><div><b>Notifications</b><span id="notifications-help">Windows toasts for new messages, briefs and finished Handoff plans while Hark is in the background.</span></div><button class="switch" id="notifications" role="switch" aria-checked="true" aria-label="Notifications"></button></div>
-        <div class="row"><div><b id="progress-title">Plan progress</b><span id="progress-help">While a Handoff plan runs, show it at the top of the screen, in the tray icon and on the taskbar button.</span></div><button class="switch" id="progress" role="switch" aria-checked="true" aria-labelledby="progress-title"></button></div>
+        <div class="row"><div><b id="autostart-title">Start with Windows</b><span id="autostart-help">Hark starts in the tray when you sign in to Windows, so your morning brief can find you.</span></div><button class="switch" id="autostart" role="switch" aria-checked="true" aria-labelledby="autostart-title" aria-describedby="autostart-help"></button></div>
+        <div class="row"><div><b id="tray-title">Keep running in the tray</b><span id="tray-help">Closing the window hides Hark instead of quitting. Quit from the tray icon.</span></div><button class="switch" id="tray" role="switch" aria-checked="true" aria-labelledby="tray-title" aria-describedby="tray-help"></button></div>
+        <div class="row"><div><b id="notifications-title">Notifications</b><span id="notifications-help">Windows notifications for new messages, briefs and finished Handoff plans while Hark is in the background.</span></div><button class="switch" id="notifications" role="switch" aria-checked="true" aria-labelledby="notifications-title" aria-describedby="notifications-help"></button></div>
+        <div class="row"><div><b id="progress-title">Plan progress</b><span id="progress-help">While a Handoff plan runs, show it at the top of the screen, in the tray icon and on the taskbar button.</span></div><button class="switch" id="progress" role="switch" aria-checked="true" aria-labelledby="progress-title" aria-describedby="progress-help"></button></div>
       </section>
       <section class="card group" aria-label="Shortcuts">
         <div class="row"><div class="keys">
           <div><span class="combo"><kbd class="mod">Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></span>Ask Hark from anywhere. In Hark, jumps to the message box.</div>
-          <div><span class="combo"><kbd class="mod">Ctrl</kbd>+<kbd>,</kbd></span>Desktop settings</div>
+          <div><span class="combo"><kbd class="mod">Ctrl</kbd>+<kbd>,</kbd></span>Settings</div>
           <div><span class="combo"><kbd class="mod">Ctrl</kbd>+<kbd>R</kbd></span>Reload Hark</div>
           <div id="f11"><span class="combo"><kbd>F11</kbd></span>Full screen</div>
           <div><span class="combo"><kbd class="mod">Ctrl</kbd>+<kbd>+</kbd>/<kbd>−</kbd>/<kbd>0</kbd></span>Zoom</div>
@@ -54,7 +65,7 @@
     </main>
     <footer>
       <button class="pill-btn" id="test-toast">Test notification</button>
-      <button class="pill-btn" id="open-hark">Open hark.com</button>
+      <button class="pill-btn" id="open-hark">Open hark.com in your browser</button>
       <button class="pill-btn" id="reload">Reload Hark</button>
     </footer>
     <p class="version" id="version">Unofficial desktop client · your account stays on hark.com</p>

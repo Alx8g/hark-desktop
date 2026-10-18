@@ -4,13 +4,14 @@ import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./frame";
 import { platform, type Platform } from "./platform";
+import "./appearance";
 
 // The page ships with the Windows wording; the other desktops say their own words.
 const WORDS: Record<Platform, Record<string, string>> = {
   windows: {},
   macos: {
     "autostart-title": "Open at login",
-    "autostart-help": "Hark waits in the menu bar from login, so your morning brief can find you.",
+    "autostart-help": "Hark starts in the menu bar when you log in, so your morning brief can find you.",
     "tray-title": "Keep running in the menu bar",
     "tray-help": "Closing the window hides Hark instead of quitting. Quit with ⌘Q or from the menu bar icon.",
     "notifications-help": "Notifications for new messages, briefs and finished Handoff plans while Hark is in the background.",
@@ -65,7 +66,11 @@ async function init() {
     el.addEventListener("click", async () => {
       const next = el.getAttribute("aria-checked") !== "true";
       el.setAttribute("aria-checked", String(next));
-      await invoke("set_setting", { key, value: next });
+      try {
+        await invoke("set_setting", { key, value: next });
+      } catch {
+        el.setAttribute("aria-checked", String(!next)); // not saved: show what is really set
+      }
     });
   }
   const versionEl = document.getElementById("version");

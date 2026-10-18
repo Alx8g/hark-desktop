@@ -29,6 +29,18 @@
       .segs i { flex: 1; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.14); transition: background 0.4s; }
       .segs i.d { background: #fff; }
       .segs i.c { background: linear-gradient(90deg, #7fb0dd, #d3e6f7, #7fb0dd); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
+      /* Only shimmer while someone can see it: not while tucked or folded. */
+      .isl:not(.open-up) .segs i.c { animation: none; }
+      /* Long plans: one continuous bar instead of hairline segments. */
+      .segs.continuous { display: block; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
+      .segs.continuous i { display: block; height: 100%; border-radius: 2px; background: #fff; transition: width 0.6s var(--ease-out); }
+      .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+      @media (forced-colors: active) {
+        .isl { border: 1px solid CanvasText; }
+        .segs i, .sliver { background: GrayText; forced-color-adjust: none; }
+        .segs i.d, .segs i.c, .sliver b, .segs.continuous i { background: Highlight; animation: none; }
+        .btn, .x { border: 1px solid ButtonText; }
+      }
       @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
       .btns { display: flex; gap: 6px; margin-top: 12px; }
       .btn { appearance: none; border: 0; cursor: pointer; font: 520 12.5px/1 var(--sans); padding: 8px 13px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); color: #fff; }
@@ -62,7 +74,8 @@
     </style>
   </head>
   <body>
-    <div class="isl gone" id="isl" role="status" aria-live="polite">
+    <p class="sr" id="announce" role="status" aria-live="polite"></p>
+    <div class="isl gone" id="isl" aria-hidden="true">
       <div class="row">
         <div class="ring"><svg viewBox="0 0 42 42" aria-hidden="true"><circle cx="21" cy="21" r="19" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="2.5"/><circle class="arc" id="arc" cx="21" cy="21" r="19" fill="none" stroke="#7fb0dd" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0 200"/></svg><div class="tile"></div></div>
         <div class="tick"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.8 10 11 4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -71,7 +84,7 @@
         <button class="btn open" data-act="open">Open</button>
         <button class="x" data-act="dismiss" aria-label="Dismiss"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2 2 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
       </div>
-      <div class="more">
+      <div class="more" id="more" inert>
         <div class="segs" id="segs"></div>
         <div class="btns"><button class="btn primary" data-act="open">Open in Hark</button><button class="btn" data-act="hide">Hide until it’s done</button></div>
       </div>
