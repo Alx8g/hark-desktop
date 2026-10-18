@@ -19,6 +19,54 @@
   if (window.__HARK_DESKTOP__) return;
   window.__HARK_DESKTOP__ = true;
 
+  /* ---------- rest: Hark is hidden or minimized ----------
+   * The page stays fully awake (messages, notifications, plans) but stops
+   * drawing: CSS animations pause, canvases hide, and animation frames run
+   * once every two seconds instead of sixty times a second. Hark's animated
+   * sky would otherwise keep a core and the GPU busy all day in the tray.
+   * Installed before Hark's own scripts, so they use these frames too. */
+  var resting = false;
+  var nativeRaf = window.requestAnimationFrame;
+  var nativeCaf = window.cancelAnimationFrame;
+  var restQueue = [];
+  var restTimer = null;
+  var restId = 1e9;
+  function flushRest() {
+    restTimer = null;
+    var due = restQueue;
+    restQueue = [];
+    var now = performance.now();
+    due.forEach(function (entry) {
+      try { entry[1](now); } catch (err) { setTimeout(function () { throw err; }); }
+    });
+  }
+  window.requestAnimationFrame = function (callback) {
+    if (!resting) return nativeRaf.call(window, callback);
+    restQueue.push([++restId, callback]);
+    if (!restTimer) restTimer = setTimeout(flushRest, 2000);
+    return restId;
+  };
+  window.cancelAnimationFrame = function (id) {
+    if (id > 1e9) {
+      restQueue = restQueue.filter(function (entry) { return entry[0] !== id; });
+      return;
+    }
+    return nativeCaf.call(window, id);
+  };
+  function setRest(rest) {
+    if (rest === resting) return;
+    resting = rest;
+    if (document.documentElement) document.documentElement.toggleAttribute("data-hark-rest", rest);
+    if (!rest && restQueue.length) {
+      clearTimeout(restTimer);
+      restTimer = null;
+      nativeRaf.call(window, flushRest);
+    }
+  }
+  /* Whether Hark is on screen and in use, as the shell sees it (null until it says). */
+  var shell = null;
+  var onShell = [];
+
   /* Needs nothing from Tauri or the DOM, so start before either is ready. */
   installFrame();
 
@@ -146,6 +194,9 @@
       ? "html{background:#1d2a44 url(\"" + sky + "\") center/cover no-repeat}"
       : "html{background:linear-gradient(168deg,#7fb0dd 0%,#b6cfe7 45%,#d9e9f6 70%,#ffeed9 120%)}html[data-theme=dark]{background:#161f39}");
     rules.push(
+      /* At rest (Hark hidden or minimized): nothing animates, nothing is drawn. */
+      "html[data-hark-rest] *,html[data-hark-rest] *::before,html[data-hark-rest] *::after{animation-play-state:paused!important}",
+      "html[data-hark-rest] canvas,html[data-hark-rest] video{visibility:hidden!important}",
       /* Signed-out screen is just the hero: no scrolling, so no scrollbar either. */
       "html[data-hark-login],html[data-hark-login] body{height:100%!important;overflow:hidden!important}",
       "[data-hark-hide]{display:none!important}"
@@ -272,8 +323,25 @@
   }
 
   /* ---------- frameless caption pill (sized to Hark's Search pill) ---------- */
-  function svgIcon(paths) {
-    return '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">' + paths + "</svg>";
+  /* Built with DOM calls rather than HTML strings: sign-in pages such as
+   * Google's enforce Trusted Types, which reject HTML from strings, and the
+   * window controls must work there too. Each shape is [tag, attributes]. */
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  var ICONS = {
+    minimize: [["path", { d: "M2 8h12", "stroke-width": "1.6", "stroke-linecap": "round" }]],
+    maximize: [["rect", { x: "2.6", y: "2.6", width: "10.8", height: "10.8", rx: "2.4", "stroke-width": "1.5" }]],
+    close: [["path", { d: "M3 3l10 10M13 3L3 13", "stroke-width": "1.6", "stroke-linecap": "round" }]]
+  };
+  function svgIcon(shapes) {
+    var svg = document.createElementNS(SVG_NS, "svg");
+    [["width", "15"], ["height", "15"], ["viewBox", "0 0 16 16"], ["fill", "none"], ["aria-hidden", "true"]].forEach(function (a) { svg.setAttribute(a[0], a[1]); });
+    shapes.forEach(function (shape) {
+      var el = document.createElementNS(SVG_NS, shape[0]);
+      el.setAttribute("stroke", "currentColor");
+      Object.keys(shape[1]).forEach(function (k) { el.setAttribute(k, shape[1][k]); });
+      svg.appendChild(el);
+    });
+    return svg;
   }
   function installCaption(emit) {
     if (!document.body || document.getElementById("hark-caption")) return;
@@ -281,10 +349,19 @@
     pill.id = "hark-caption";
     pill.setAttribute("role", "group");
     pill.setAttribute("aria-label", "Window controls");
-    pill.innerHTML =
-      '<button data-act="minimize" title="Minimize" aria-label="Minimize window">' + svgIcon('<path d="M2 8h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>') + "</button>" +
-      '<button data-act="maximize" title="Maximize or restore" aria-label="Maximize or restore window">' + svgIcon('<rect x="2.6" y="2.6" width="10.8" height="10.8" rx="2.4" stroke="currentColor" stroke-width="1.5"/>') + "</button>" +
-      '<button data-act="close" class="hark-close" title="Close" aria-label="Close window">' + svgIcon('<path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>') + "</button>";
+    [
+      ["minimize", "Minimize", "Minimize window", ""],
+      ["maximize", "Maximize or restore", "Maximize or restore window", ""],
+      ["close", "Close", "Close window", "hark-close"]
+    ].forEach(function (b) {
+      var btn = document.createElement("button");
+      btn.setAttribute("data-act", b[0]);
+      btn.title = b[1];
+      btn.setAttribute("aria-label", b[2]);
+      if (b[3]) btn.className = b[3];
+      btn.appendChild(svgIcon(ICONS[b[0]]));
+      pill.appendChild(btn);
+    });
     pill.addEventListener("click", function (e) {
       var btn = e.target.closest("button[data-act]");
       if (btn) emit("hark-window", { action: btn.getAttribute("data-act") });
@@ -309,11 +386,20 @@
       if (getComputedStyle(t).cursor === "pointer") return false;
       return true;
     }
+    /* The first press hands the mouse to the system to move the window, so the
+     * page never sees a dblclick: a second press soon after, in the same spot,
+     * is the double-click. */
+    var lastDown = 0, lastX = 0, lastY = 0;
     document.addEventListener("mousedown", function (e) {
-      if (e.button === 0 && inDragArea(e)) emit("hark-window", { action: "drag" });
-    }, true);
-    document.addEventListener("dblclick", function (e) {
-      if (inDragArea(e)) emit("hark-window", { action: "maximize" });
+      if (e.button !== 0 || !inDragArea(e)) return;
+      var now = Date.now();
+      if (now - lastDown < 500 && Math.abs(e.clientX - lastX) < 6 && Math.abs(e.clientY - lastY) < 6) {
+        lastDown = 0;
+        emit("hark-window", { action: "maximize" });
+        return;
+      }
+      lastDown = now; lastX = e.clientX; lastY = e.clientY;
+      emit("hark-window", { action: "drag" });
     }, true);
   }
 
@@ -370,10 +456,10 @@
 
   /* ---------- new agent messages -> toast + tray unread ----------
    * Who sent a bubble is read from HOW Hark draws it, not from exact theme colours. (Matching exact colours broke
-   * silently once: light mode fills bubbles with rgba(255,255,255,a) but dark mode with rgba(29,29,31,a), so nothing
-   * matched and the user's own messages were toasted as if Hark had written them.)
-   *   - the bubble's fill ([data-continuous-fill]) is more transparent for the user's own messages (alpha ~0.3) than
-   *     for Hark's replies (~0.7 dark, ~0.98 light);
+   * silently twice: light and dark mode fill bubbles differently, and since October 2026 Hark draws its replies with
+   * no fill at all, which read as the user's own and silenced every reply notification.)
+   *   - the user's own messages sit in a tinted bubble ([data-continuous-fill], alpha ~0.3);
+   *   - Hark's replies have no fill (alpha 0) or an opaque one (~0.7 dark, ~0.98 light) in older designs;
    *   - Hark's replies render as markdown blocks, the user's as a single plain text span.
    * Returns "user" | "agent" | "unknown". Only a bubble positively recognised as "agent" ever raises a toast, so a
    * future restyle can at worst silence toasts, never toast the user's own words. */
@@ -390,11 +476,13 @@
     var text = (bubble.innerText || "").trim().replace(/\s+/g, " ");
     if (lastSent && text && text.indexOf(lastSent.slice(0, 60)) === 0) return "user"; /* typed in this window */
     var alpha = bubbleFillAlpha(bubble);
+    var blocks = !!bubble.querySelector('[class*="space-y-"], p, ul, ol, pre, blockquote, table, h1, h2, h3');
     if (alpha !== null) {
+      if (alpha < 0.05) return blocks ? "agent" : "unknown"; /* no fill: Hark's reply, once it has text */
       if (alpha <= 0.45) return "user";
       if (alpha >= 0.6) return "agent";
     }
-    if (bubble.querySelector('[class*="space-y-"], p, ul, ol, pre, blockquote, table, h1, h2, h3')) return "agent";
+    if (blocks) return "agent";
     return "unknown";
   }
 
@@ -427,6 +515,10 @@
     }, true);
     document.addEventListener("submit", rememberDraft, true);
 
+    /* Away from Hark: hidden, minimized, or another app in front. The shell
+     * knows; the page alone can't tell (WebView2 reports focus to a hidden
+     * window), so it is only the fallback until the shell has said. */
+    function away() { return shell ? !shell.front : (document.hidden || !document.hasFocus()); }
     function setUnread(n) {
       if (n === unread) return;
       unread = n;
@@ -450,16 +542,22 @@
         var keep = Array.from(seen).slice(-300);
         seen = new Set(keep);
       }
-      setTimeout(function () {
-        if (classifyBubble(bubble, lastSentText) !== "agent") return; /* yours, or not sure: stay quiet */
+      /* A reply's bubble can appear before its words stream in: look again for a while. */
+      var tries = 0;
+      (function look() {
         var text = (bubble.innerText || "").trim().replace(/\s+/g, " ");
-        if (!text) return;
-        if (document.hidden || !document.hasFocus()) {
+        var who = text ? classifyBubble(bubble, lastSentText) : "unknown";
+        if (!text || who === "unknown") {
+          if (++tries < 40 && document.contains(bubble)) setTimeout(look, 500);
+          return;
+        }
+        if (who !== "agent") return; /* yours: stay quiet */
+        if (away()) {
           setUnread(unread + 1);
           pendingToasts.push(text.slice(0, 140));
           if (!toastTimer) toastTimer = setTimeout(flushToasts, 2500);
         }
-      }, 350);
+      })();
     }
 
     var observer = new MutationObserver(function (mutations) {
@@ -475,9 +573,10 @@
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    function clearUnread() { if (!document.hidden) setUnread(0); }
+    function clearUnread() { if (!away()) setUnread(0); }
     document.addEventListener("visibilitychange", clearUnread);
     window.addEventListener("focus", clearUnread);
+    onShell.push(clearUnread);
   }
 
   /* ---------- Handoff plans -> plan island, tray icon and taskbar progress ----------
@@ -732,6 +831,12 @@
       } catch (e) { /* shell gone */ }
     }
     resumeCompose(emit);
+    on("hark-shell", function (ev) {
+      var said = ev && ev.payload ? ev.payload : {};
+      shell = { rest: !!said.rest, front: !!said.front };
+      setRest(shell.rest);
+      onShell.forEach(function (fn) { try { fn(); } catch (e) { /* keep going */ } });
+    });
     on("hark-focus-composer", function () { focusComposer(); });
     on("hark-compose", function (ev) {
       var text = ev && ev.payload && ev.payload.text ? String(ev.payload.text) : "";
