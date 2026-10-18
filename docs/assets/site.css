@@ -41,7 +41,8 @@ a { color: inherit; }
 
 /* ---------- header ---------- */
 .top { position: fixed; inset: 0 0 auto 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px clamp(16px, 2vw, 28px); pointer-events: none; }
-.top::before { content: ""; position: absolute; inset: 0 0 -28px; background: linear-gradient(rgba(20, 20, 20, 0.85), rgba(20, 20, 20, 0)); }
+/* Frosted, so whatever scrolls beneath the wordmark and buttons blurs away instead of showing through. */
+.top::before { content: ""; position: absolute; inset: 0 0 -24px; background: linear-gradient(rgba(20, 20, 20, 0.82), rgba(20, 20, 20, 0.55) 70%, rgba(20, 20, 20, 0)); -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2); -webkit-mask-image: linear-gradient(#000 62%, transparent); mask-image: linear-gradient(#000 62%, transparent); }
 .top > * { position: relative; pointer-events: auto; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
 .brand b { font: 400 26px/1 var(--serif); letter-spacing: -0.025em; }
@@ -174,6 +175,8 @@ a { color: inherit; }
 .section-head { text-align: center; width: min(760px, calc(100% - 40px)); margin: clamp(110px, 15vw, 240px) auto 0; }
 .section-head h2 { font: 400 clamp(36px, 4.6vw, 60px)/1.05 var(--serif); letter-spacing: -0.03em; }
 .section-head p { margin: 20px auto 0; max-width: 560px; font: 500 17px/1.45 var(--sans); color: var(--fg-2); }
+.section-head .release { margin-top: 14px; font-size: 14px; color: var(--fg-3); }
+.section-head .release a { color: var(--fg); text-underline-offset: 3px; }
 .dl { width: min(1320px, calc(100% - 40px)); margin: clamp(36px, 5vw, 64px) auto 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .os { position: relative; display: flex; flex-direction: column; padding: 34px; border-radius: 28px; background: var(--raise); overflow: hidden; isolation: isolate; }
 .os::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: 0; transition: opacity 0.5s var(--ease); background: radial-gradient(120% 70% at 85% -10%, rgba(120, 160, 255, 0.35), transparent 60%), radial-gradient(90% 60% at 0% 110%, rgba(255, 170, 140, 0.25), transparent 60%); }
