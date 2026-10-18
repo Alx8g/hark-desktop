@@ -907,6 +907,14 @@ fn show_main(app: &AppHandle) {
     show_main_now(app);
 }
 
+/* With HARK_DESKTOP_LOG set, key moments go to stderr: how the smoke test
+ * sees inside the app on machines nobody can sit at. Off otherwise. */
+fn trace(what: &str) {
+    if std::env::var_os("HARK_DESKTOP_LOG").is_some() {
+        eprintln!("[hark-desktop] {what}");
+    }
+}
+
 /* Tell Hark's page whether you can see it ("rest") and whether you are using
  * it ("front"). At rest, bridge.js pauses Hark's animations, so the animated
  * sky costs next to nothing in the tray, while the page stays fully awake for
@@ -1794,6 +1802,7 @@ fn saved_main_bounds(
 /* Hark has painted: bring the daylight up, show Hark underneath the loading
  * screen and fade the loading screen away. Or stay in the tray. */
 fn reveal_main(app: &AppHandle) {
+    trace("reveal_main");
     let state = app.state::<AppState>();
     // Mark it loaded and take any waiting quick-ask text under one lock, so a
     // quick ask arriving at this moment is either taken here or sent directly.
@@ -1884,13 +1893,17 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
     .visible(false)
     .focused(true)
     .initialization_script(bridge)
-    .on_navigation(move |url: &Url| match navigation(url, FRAMES_REPORTED) {
-        Nav::Allow => true,
-        Nav::OpenOutside => {
-            open_external(&nav_app, url.as_str());
-            false
+    .on_navigation(move |url: &Url| {
+        let nav = navigation(url, FRAMES_REPORTED);
+        trace(&format!("navigation {nav:?} {}://{}", url.scheme(), url.host_str().unwrap_or("")));
+        match nav {
+            Nav::Allow => true,
+            Nav::OpenOutside => {
+                open_external(&nav_app, url.as_str());
+                false
+            }
+            Nav::Block => false,
         }
-        Nav::Block => false,
     })
     .on_new_window(move |url: Url, _features| {
         if in_app_page(&url) {
@@ -1911,6 +1924,13 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
         let state = app.state::<AppState>();
         let finished = payload.event() == tauri::webview::PageLoadEvent::Finished;
         let url = payload.url().clone();
+        trace(&format!(
+            "page {} {}://{}{}",
+            if finished { "finished" } else { "started" },
+            url.scheme(),
+            url.host_str().unwrap_or(""),
+            url.path()
+        ));
         // The page itself is leaving Hark (macOS and Linux let it through
         // navigation(), see there): open it in the browser and go back.
         if !host_allowed(&url) && matches!(url.scheme(), "http" | "https") {
@@ -2501,9 +2521,13 @@ fn install_bridge_listeners(app: &AppHandle) {
     // The loading screen hands over once Hark has painted. If the paint signal
     // never comes but the page is up, show it anyway after a few seconds.
     let h = app.clone();
-    app.listen("hark-painted", move |_event| reveal_main(&h));
+    app.listen("hark-painted", move |_event| {
+        trace("hark-painted");
+        reveal_main(&h);
+    });
     let h = app.clone();
     app.listen("hark-ready", move |_event| {
+        trace("hark-ready");
         h.state::<AppState>().page_ok.store(true, Ordering::SeqCst);
         // A page that has just loaded knows nothing yet: tell it, once it listens.
         let told = h.clone();
