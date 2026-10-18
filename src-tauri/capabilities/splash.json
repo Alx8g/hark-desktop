@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "splash",
+  "description": "The loading screen. Local page only; it gets just what it uses.",
+  "windows": [
+    "splash"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-app-loaded",
+    "allow-splash-retry",
+    "allow-splash-hide",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://hark.com/*"
+        }
+      ]
+    }
+  ]
+}

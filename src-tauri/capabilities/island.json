@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "island",
+  "description": "The plan island. Local page only; it gets just what it uses.",
+  "windows": [
+    "island"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-island-state",
+    "allow-island-rect",
+    "allow-island-open",
+    "allow-island-hide-plan",
+    "allow-island-dismiss"
+  ]
+}

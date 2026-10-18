@@ -17,10 +17,13 @@ These are out of scope: bugs in hark.com itself (report those to Hark), and prob
 
 ## How the app limits what hark.com can do
 
-- hark.com pages may only emit and listen to Tauri events (`src-tauri/capabilities/remote.json`). They cannot call commands.
-- The Rust side validates every event and performs the native action itself.
-- Navigation outside a short allow-list of hosts (Hark, Google and Apple sign-in, Cloudflare, Stripe) opens in your default browser.
-- The app never sees your password. Sign-in happens on Hark's own pages.
+- hark.com may only emit and listen to Tauri events (`src-tauri/capabilities/remote.json`, `https://hark.com` only). It cannot call the app's commands or any plugin. The Google, Apple and Stripe pages Hark sends you to may only emit events, so the window controls drawn on them work (`sign-in.json`). The app's own windows are each granted only the commands they use (`src-tauri/capabilities/*.json`, `src-tauri/build.rs`).
+- The page script runs in Hark's top-level page only, never in frames inside it.
+- The Rust side validates every event before acting on it. Text from the page is cleaned and capped before it is shown in the tray, the plan island or a notification, and notifications are rate-limited.
+- Links handed to the operating system are limited to web pages, email and phone numbers. Other schemes, local files and other apps' links are dropped.
+- Only Hark and the exact sign-in, payment and challenge pages its flows use open inside the app, over https. Everything else opens in your default browser.
+- Downloads keep the name the site suggests, are made safe for your file system, and never overwrite a file. Files that can run code (programs, installers, scripts, shortcuts, disk images) open in your browser instead, where its download checks apply.
+- The app's own pages run under a content security policy, and the app never sees your password: sign-in happens on Hark's own pages.
 
 ## Supported versions
 
