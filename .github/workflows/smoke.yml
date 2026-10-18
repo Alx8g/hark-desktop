@@ -1,14 +1,15 @@
 name: Smoke test
 
-# Install a published release on GitHub's macOS and Linux machines, open it, and keep screenshots and the
-# app's log as run artifacts. Nobody signs in: it shows the loading screen, then hark.com's sign-in page.
-# Run it by hand from the Actions tab.
+# Install a published release (or build the chosen branch) on GitHub's macOS and Linux machines, open it,
+# and keep screenshots and the app's log as run artifacts. Nobody signs in: it shows the loading screen,
+# then hark.com's sign-in page. Run it by hand from the Actions tab.
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release to test, for example v0.2.1
-        required: true
+        description: Release to test, for example v0.2.2. Leave empty to build the branch instead.
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -20,15 +21,40 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Download the disk image
+        if: inputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern "*_universal.dmg" --dir dl
 
+      - uses: actions/checkout@v7
+        if: inputs.tag == ''
+      - uses: pnpm/action-setup@v6
+        if: inputs.tag == ''
+      - uses: actions/setup-node@v7
+        if: inputs.tag == ''
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.tag == ''
+      - uses: swatinem/rust-cache@v2
+        if: inputs.tag == ''
+        with:
+          workspaces: src-tauri
+      - name: Build the branch
+        if: inputs.tag == ''
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm tauri build --bundles app
+          mkdir -p built && cp -R src-tauri/target/release/bundle/macos/*.app built/
+
       - name: Install
         run: |
-          hdiutil attach dl/*.dmg -mountpoint /Volumes/hark -nobrowse -quiet
-          cp -R /Volumes/hark/*.app /Applications/
-          hdiutil detach /Volumes/hark -quiet
+          if [ -d built ]; then cp -R built/*.app /Applications/; else
+            hdiutil attach dl/*.dmg -mountpoint /Volumes/hark -nobrowse -quiet
+            cp -R /Volumes/hark/*.app /Applications/
+            hdiutil detach /Volumes/hark -quiet
+          fi
           # Not notarised: what "right click, Open" does for a person.
           xattr -cr /Applications/Hark.app
           ls /Applications/Hark.app/Contents/MacOS
@@ -37,7 +63,7 @@ jobs:
         run: |
           mkdir -p out
           bin=$(ls /Applications/Hark.app/Contents/MacOS/* | head -1)
-          "$bin" > out/app.log 2>&1 &
+          HARK_DESKTOP_LOG=1 "$bin" > out/app.log 2>&1 &
           echo $! > out/pid
           for t in 2 6 12 25 40; do
             sleep $(( t - ${last:-0} )); last=$t
@@ -68,9 +94,34 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Download the deb
+        if: inputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern "*_amd64.deb" --dir dl
+
+      - uses: actions/checkout@v7
+        if: inputs.tag == ''
+      - uses: pnpm/action-setup@v6
+        if: inputs.tag == ''
+      - uses: actions/setup-node@v7
+        if: inputs.tag == ''
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.tag == ''
+      - uses: swatinem/rust-cache@v2
+        if: inputs.tag == ''
+        with:
+          workspaces: src-tauri
+      - name: Build the branch
+        if: inputs.tag == ''
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+          pnpm install --frozen-lockfile
+          pnpm tauri build --bundles deb
+          mkdir -p dl && cp src-tauri/target/release/bundle/deb/*.deb dl/
 
       - name: Install it, a virtual screen and a window manager
         run: |
@@ -87,7 +138,7 @@ jobs:
           # A virtual screen has no GPU: WebKitGTK's usual advice for VMs.
           export WEBKIT_DISABLE_DMABUF_RENDERER=1
           echo "binary: $bin"
-          dbus-run-session -- "$bin" > out/app.log 2>&1 &
+          HARK_DESKTOP_LOG=1 dbus-run-session -- "$bin" > out/app.log 2>&1 &
           echo $! > out/pid
           for t in 2 6 12 25 40; do
             sleep $(( t - ${last:-0} )); last=$t
