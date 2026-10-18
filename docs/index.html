@@ -16,7 +16,7 @@
     <link rel="icon" href="assets/favicon.png" type="image/png" />
     <link rel="preload" href="assets/fonts/newsreader-opsz.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/fonts/inter-tight.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="stylesheet" href="assets/site.css?v=3" />
+    <link rel="stylesheet" href="assets/site.css?v=4" />
   </head>
   <body>
     <header class="top">
@@ -63,7 +63,7 @@
       <section class="block" id="features">
         <div class="copy" data-reveal>
           <h2>Ask from anywhere</h2>
-          <p>Press <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>H</kbd> (<kbd>Cmd</kbd> <kbd>Shift</kbd> <kbd>H</kbd> on a Mac) and a little piece of Hark's sky opens near the top of your screen, over whatever you are doing.</p>
+          <p>Press <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>H</kbd>, or <kbd>Cmd</kbd> <kbd>Shift</kbd> <kbd>H</kbd> on a Mac, and a little piece of Hark's sky opens near the top of your screen, over whatever you are doing.</p>
           <p>Type, press Enter, and Hark opens with your question drafted. It never sends for you.</p>
         </div>
         <div class="panel sky-dusk" data-reveal="2" role="img" aria-label="Quick ask, opened with the Ctrl, Shift and H keys: a small panel of Hark's sky with a greeting and a message bar">
@@ -121,7 +121,7 @@
         <div class="panel sky-night" data-reveal role="img" aria-label="Three steps: you sign in on hark.com, the page sends small events, the app checks each one">
           <div class="steps">
             <div class="step glass"><em>1</em><div><b>You sign in on hark.com</b><span>Google, Apple or email, on Hark's own pages.</span></div></div>
-            <div class="step glass"><em>2</em><div><b>The page sends small events</b><span>Things like "show a notification".</span></div></div>
+            <div class="step glass"><em>2</em><div><b>The page sends small events</b><span>Things like “show a notification”.</span></div></div>
             <div class="step glass"><em>3</em><div><b>The app checks each one</b><span>Anything else is ignored.</span></div></div>
           </div>
         </div>
@@ -155,6 +155,7 @@
         <div class="section-head" data-reveal>
           <h2>Choose your system</h2>
           <p>Windows is the tested platform. The macOS and Linux builds are new and have not yet been run by the maintainer, so expect rough edges and please tell us what you find.</p>
+          <p class="release" id="release" hidden></p>
         </div>
         <div class="dl">
           <article class="os" data-os="windows" data-reveal>
@@ -202,7 +203,7 @@
           </details>
           <details>
             <summary>What can the app see?</summary>
-            <p>Only what a browser tab on hark.com can see. You sign in on Hark's own pages, so the app never handles your password. The Hark page can send the app a few small events, such as "show a notification", and the app checks each one before acting. It cannot read your files or run commands.</p>
+            <p>Only what a browser tab on hark.com can see. You sign in on Hark's own pages, so the app never handles your password. The Hark page can send the app a few small events, such as “show a notification”, and the app checks each one before acting. It cannot read your files or run commands.</p>
           </details>
           <details>
             <summary>Why does my computer warn me when I open it?</summary>
@@ -258,6 +259,6 @@
       </div>
     </footer>
 
-    <script src="assets/site.js?v=3"></script>
+    <script src="assets/site.js?v=4"></script>
   </body>
 </html>

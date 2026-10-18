@@ -1,7 +1,8 @@
 // Progressive enhancement only: the page is complete without this script.
 // 1. Name the repository once, so every GitHub link points at it.
 // 2. Highlight the visitor's system and label the main buttons.
-// 3. Point each download button at the right file from the latest release, when GitHub answers.
+// 3. Point each download button at the right file from the latest release, when GitHub answers,
+//    and say which version that is, with a link to what's new in it.
 // 4. Fade sections in as they scroll into view, and flatten the hero window as you scroll.
 // No analytics, no cookies, no third-party scripts. The one request is to GitHub's public API.
 (function () {
@@ -52,6 +53,7 @@
   })
     .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
     .then(function (release) {
+      showRelease(release);
       var assets = release.assets || [];
       Object.keys(PATTERNS).forEach(function (key) {
         var hit = null;
@@ -66,6 +68,22 @@
       });
     })
     .catch(function () { /* no release yet: the buttons keep their link to the releases page */ });
+
+  // "Version 0.2.0 · 18 October 2026 · What's new", built from text nodes only.
+  function showRelease(release) {
+    var line = document.getElementById("release");
+    var tag = String(release.tag_name || "");
+    var page = String(release.html_url || "");
+    if (!line || !/^v?\d+\.\d+\.\d+$/.test(tag) || page.indexOf(REPO + "/releases/") !== 0) return;
+    var when = release.published_at ? new Date(release.published_at) : null;
+    var date = when && !isNaN(when) ? when.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "";
+    line.textContent = "Version " + tag.replace(/^v/, "") + (date ? " · " + date : "") + " · ";
+    var link = document.createElement("a");
+    link.href = page;
+    link.textContent = "What’s new";
+    line.appendChild(link);
+    line.hidden = false;
+  }
 
   // ---------- motion ----------
   var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
