@@ -1,8 +1,8 @@
 /* Hark Desktop: page bridge.
  * Injected by the Rust shell into every hark.com page (Tauri initialization
  * script). It makes the real Hark web app behave like a native desktop app:
- * native notifications, tray unread counts, taskbar progress from Handoff
- * plan steps, external-link handling, zoom and offline handling. On Windows,
+ * native notifications, tray unread counts, Handoff plan progress (plan
+ * island, tray icon, taskbar), external-link handling, zoom and offline handling. On Windows,
  * where the window is frameless, it also draws caption controls in Hark's own
  * frosted-pill language and the rounded window silhouette; macOS and Linux
  * keep the operating system's own window frame.
@@ -43,6 +43,22 @@
     })();
   }
 
+  /* Hark is usable long before its "load" event (a slow resource can hold that
+   * back for many seconds), so wait for its interface instead: the message box,
+   * the message list or the sign-in field, then two frames so it has painted.
+   * Gives up waiting after 3 seconds. */
+  function whenPainted(fn) {
+    var started = Date.now();
+    (function look() {
+      var ui = document.querySelector('[data-testid="chat-input"], [data-testid="message-list"], ' + LOGIN_FIELD);
+      if (ui || Date.now() - started > 3000) {
+        requestAnimationFrame(function () { requestAnimationFrame(fn); });
+        return;
+      }
+      setTimeout(look, 80);
+    })();
+  }
+
   function onReady(fn) {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fn);
     else fn();
@@ -70,6 +86,8 @@
     installOffline();
     installShellEvents(T);
     emit("hark-ready", { href: location.href });
+    /* The loading screen waits for this: Hark's own interface is on screen. */
+    whenPainted(function () { emit("hark-painted", { href: location.href }); });
     /* React re-renders can drop our fixed nodes; keep them present. */
     setInterval(function () {
       if (isWindows() && !document.getElementById("hark-caption")) installCaption(emit);
@@ -406,27 +424,45 @@
     window.addEventListener("focus", clearUnread);
   }
 
-  /* ---------- Handoff plan steps -> Windows taskbar progress ---------- */
+  /* ---------- Handoff plans -> plan island, tray icon and taskbar progress ----------
+   * Hark labels each plan's button "<title>. Plan, <done> of <total> steps done".
+   * The shell gets the running plans (hark-plans), each finish (hark-plan-done)
+   * and the furthest-along percentage for the taskbar button (hark-progress). */
+  var PLAN_LABEL = /^(.*)\.\s*Plan,\s*(\d+)\s*of\s*(\d+)\s*steps done/;
+  function readPlans() {
+    var plans = [];
+    document.querySelectorAll("button[aria-label]").forEach(function (btn) {
+      var m = (btn.getAttribute("aria-label") || "").match(PLAN_LABEL);
+      if (!m) return;
+      var total = parseInt(m[3], 10);
+      if (!total) return;
+      plans.push({ title: m[1].trim(), done: Math.min(parseInt(m[2], 10), total), total: total });
+    });
+    return plans;
+  }
   function installProgress(emit) {
     var lastPct = -1; /* -1 = no active plan */
-    var activeLabels = {};
+    var lastSent = "";
+    var running = {};
     function scan() {
       var best = -1;
-      var nowActive = {};
-      document.querySelectorAll("button[aria-label]").forEach(function (btn) {
-        var label = btn.getAttribute("aria-label") || "";
-        var m = label.match(/^(.*)\.\s*Plan,\s*(\d+)\s*of\s*(\d+)\s*steps done/);
-        if (!m) return;
-        var done = parseInt(m[2], 10), total = parseInt(m[3], 10);
-        if (!total) return;
-        if (done < total) {
-          nowActive[m[1]] = true;
-          best = Math.max(best, Math.round((done / total) * 100));
-        } else if (activeLabels[m[1]]) {
-          emit("hark-notify", { title: "Hark finished", body: m[1] });
+      var active = [];
+      var nowRunning = {};
+      readPlans().forEach(function (p) {
+        if (p.done < p.total) {
+          if (!nowRunning[p.title]) active.push(p);
+          nowRunning[p.title] = true;
+          best = Math.max(best, Math.round((p.done / p.total) * 100));
+        } else if (running[p.title]) {
+          emit("hark-plan-done", { title: p.title, total: p.total });
         }
       });
-      activeLabels = nowActive;
+      running = nowRunning;
+      var sent = JSON.stringify(active);
+      if (sent !== lastSent) {
+        lastSent = sent;
+        emit("hark-plans", { plans: active });
+      }
       if (best === -1) {
         var bar = document.querySelector('[role="progressbar"][aria-valuenow]');
         if (bar) {
@@ -496,7 +532,7 @@
   function installOffline() {
     var pill = document.createElement("div");
     pill.id = "hark-offline";
-    pill.innerHTML = "<span>You're offline — Hark will pick up right where you left off.</span>";
+    pill.innerHTML = "<span>You're offline. Hark picks up where you left off when you're back.</span>";
     var btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = "Retry";
@@ -515,15 +551,34 @@
     if (el) { el.focus(); return true; }
     return false;
   }
-  function insertComposerText(text) {
+  /* Put quick-ask text in Hark's message box. If Hark is on another page, go to
+   * Chat first and wait for the box; if the box already holds a half-written
+   * message, add the new text below it rather than replacing it. */
+  function insertComposerText(text, tries) {
     var el = document.querySelector('[data-testid="chat-input"]');
-    if (!el) return;
+    if (!el) {
+      if (!tries) clickAria("Chat");
+      if ((tries || 0) < 30) setTimeout(function () { insertComposerText(text, (tries || 0) + 1); }, 100);
+      return;
+    }
     el.focus();
+    var existing = (el.value || "").replace(/\s+$/, "");
+    var value = existing ? existing + "\n\n" + text : text;
     var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
-    if (setter && setter.set) setter.set.call(el, text);
-    else el.value = text;
+    if (setter && setter.set) setter.set.call(el, value);
+    else el.value = value;
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
+    try { el.setSelectionRange(value.length, value.length); } catch (e) { /* not a text field */ }
+  }
+  /* The plan island's Open: press that plan's own button in Hark. */
+  function openPlan(title) {
+    var plans = document.querySelectorAll("button[aria-label]");
+    for (var i = 0; i < plans.length; i++) {
+      var m = (plans[i].getAttribute("aria-label") || "").match(PLAN_LABEL);
+      if (m && m[1].trim() === title) { plans[i].click(); return true; }
+    }
+    return false;
   }
   function clickAria(label) {
     var el = document.querySelector('button[aria-label="' + label + '"]');
@@ -536,6 +591,10 @@
       var text = ev && ev.payload && ev.payload.text ? String(ev.payload.text) : "";
       if (text) insertComposerText(text);
       else focusComposer();
+    });
+    T.event.listen("hark-open-plan", function (ev) {
+      var title = ev && ev.payload ? String(ev.payload.title || "") : "";
+      if (title && !openPlan(title)) { if (!clickAria("Chat")) location.assign("/chat"); }
     });
     T.event.listen("hark-navigate", function (ev) {
       var target = ev && ev.payload ? ev.payload.target : "";

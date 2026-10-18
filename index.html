@@ -6,19 +6,54 @@
     <title>Hark</title>
     <link rel="stylesheet" href="/src/shell.css" />
     <style>
-      body { display: grid; place-items: center; }
-      .splash { text-align: center; padding: 36px 44px 30px; width: 340px; }
-      .status { margin-top: 10px; font-size: 13.5px; color: var(--ink-50); min-height: 18px; }
-      .bar { margin: 22px auto 4px; width: 180px; height: 4px; border-radius: 999px; background: rgba(29,29,31,.1); overflow: hidden; }
-      .bar i { display: block; height: 100%; width: 38%; border-radius: 999px; background: var(--ink); animation: slide 1.15s var(--ease) infinite; }
-      @keyframes slide { 0% { transform: translateX(-110%);} 100% { transform: translateX(300%);} }
+      /* Sunrise: the loading screen is the Hark window itself, at its own size and
+         place. Hark's sky rises from dawn to day while hark.com loads, and Hark
+         arrives with the daylight. */
+      body { position: relative; overflow: hidden; background: linear-gradient(180deg, #0e1a38 0%, #2c3f73 46%, #b98479 80%, #f2b08a 100%); transition: opacity 0.3s ease, filter 1.5s ease; }
+      .sun { position: absolute; left: 50%; top: 80%; width: 1100px; height: 1100px; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(circle, rgba(255, 222, 184, 0.95) 0%, rgba(255, 190, 150, 0.5) 22%, rgba(255, 170, 130, 0.12) 45%, transparent 62%); transition: top 3.2s cubic-bezier(0.3, 0.1, 0.3, 1), opacity 1.5s; }
+      .day { position: absolute; inset: 0; opacity: 0; transition: opacity 3.2s ease-in-out; }
+      .center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 18px; text-align: center; padding: 0 24px 40px; }
+      .center .tile { --s: 72px; }
+      .wm { font: 400 30px/1 var(--serif); letter-spacing: -0.02em; color: #fff; transition: color 1.6s; }
+      .wm em { font-style: italic; color: rgba(255, 255, 255, 0.65); transition: color 1.6s; }
+      .text { min-height: 24px; display: grid; justify-items: center; gap: 10px; color: var(--ink); }
+      .text > * { animation: show 0.4s var(--ease-out); }
+      @keyframes show { from { opacity: 0; transform: translateY(6px); } }
+      .status { font: 460 15px/1.4 var(--sans); color: var(--ink-60); }
+      h1 { font: 400 38px/1.08 var(--serif); letter-spacing: -0.025em; font-weight: 400; }
+      p { font: 460 15.5px/1.5 var(--sans); color: var(--ink-60); max-width: 420px; }
+      .acts { display: flex; gap: 8px; margin-top: 8px; }
+      /* rising: almost day while we wait */
+      body.rise .day { opacity: 0.88; }
+      body.rise .sun { top: 12%; opacity: 0.4; }
+      body.rise .wm { color: var(--ink); }
+      body.rise .wm em { color: rgba(29, 29, 31, 0.45); }
+      /* Hark has painted: full day, then fade to reveal it underneath */
+      body.arrive .day { opacity: 1; transition-duration: 0.35s; }
+      body.arrive .sun { transition-duration: 0.35s; }
+      body.out { opacity: 0; }
+      html[data-platform="linux"] body.out { opacity: 1; }
+      /* offline: the sky sinks back to dusk */
+      body.dusk { filter: saturate(0.5); }
+      body.dusk .day { opacity: 0.08; }
+      body.dusk .sun { top: 96%; opacity: 0.55; }
+      body.dusk .text, body.dusk .status, body.dusk p { color: rgba(255, 255, 255, 0.85); }
+      body.dusk .wm { color: #fff; }
+      body.dusk .wm em { color: rgba(255, 255, 255, 0.65); }
     </style>
   </head>
   <body>
-    <main class="card splash drag" data-tauri-drag-region>
-      <div class="wordmark">hark <em>pro</em></div>
-      <p class="status" id="status">Getting your brief ready…</p>
-      <div class="bar" aria-hidden="true"><i></i></div>
+    <div class="sun"></div>
+    <div class="day sky"></div>
+    <div class="caption" role="group" aria-label="Window controls">
+      <button data-act="minimize" title="Minimize" aria-label="Minimize window"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 8h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      <button data-act="maximize" title="Maximize or restore" aria-label="Maximize or restore window"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2.6" y="2.6" width="10.8" height="10.8" rx="2.4" stroke="currentColor" stroke-width="1.5"/></svg></button>
+      <button data-act="hide" class="close" title="Close (Hark keeps loading in the tray)" aria-label="Close window"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <main class="center" data-tauri-drag-region>
+      <div class="tile"></div>
+      <div class="wm">hark <em>desktop</em></div>
+      <div class="text" id="text" aria-live="polite"></div>
     </main>
     <script type="module" src="/src/splash.ts"></script>
   </body>

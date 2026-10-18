@@ -25,7 +25,7 @@
     "copyright": "Unofficial client, not affiliated with Hark. MIT licensed.",
     "license": "MIT",
     "shortDescription": "Hark Desktop",
-    "longDescription": "A lightweight, unofficial desktop client for Hark (hark.com). Your real Hark account (chat, Projects, Panels and Handoff) in a fast native shell with tray residence, native notifications and taskbar progress.",
+    "longDescription": "A lightweight, unofficial desktop client for Hark (hark.com). Your real Hark account (chat, Projects, Panels and Handoff) in a fast native shell with tray residence, native notifications and live Handoff plan progress.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
