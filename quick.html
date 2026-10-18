@@ -8,17 +8,28 @@
     <style>
       /* The window is transparent; the margin round the panel holds its shadow. Clicking the margin closes the box. */
       body { padding: 22px 40px 58px; }
-      .little { position: relative; border-radius: 24px; padding: 18px 20px 20px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5), 0 30px 70px -20px rgba(8, 24, 60, 0.65), 0 8px 18px -8px rgba(8, 24, 60, 0.3); }
+      .little { position: relative; overflow: hidden; border-radius: 24px; padding: 18px 20px 20px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3), 0 22px 48px -18px rgba(8, 24, 60, 0.65), 0 8px 18px -8px rgba(8, 24, 60, 0.3); }
+      /* A light veil over Hark's sky keeps the greeting readable on any sky. */
+      .little::before { content: ""; position: absolute; inset: 0; background: var(--veil); pointer-events: none; }
+      .little > * { position: relative; }
+      /* Hidden the moment the box closes, so the next open starts from nothing
+         instead of flashing the last frame before the arrive animation. */
+      .little.away { opacity: 0; }
       .little.show { animation: arrive 0.2s var(--ease-out); }
       @keyframes arrive { from { opacity: 0; transform: translateY(-8px) scale(0.98); } }
-      .hello { font: 400 31px/1.12 var(--serif); letter-spacing: -0.025em; margin: 4px 4px 16px; }
-      .hello i { color: var(--ink-60); }
-      .composer { display: flex; align-items: flex-start; gap: 10px; padding: 10px 10px 10px 20px; border-radius: 28px; background: rgba(255, 255, 255, 0.82); box-shadow: inset 0 0 0 1px rgba(29, 29, 31, 0.08), 0 8px 24px rgba(29, 29, 31, 0.08); transition: border-radius 0.2s; }
+      .hello { font: 400 31px/1.12 var(--serif); letter-spacing: -0.025em; margin: 4px 4px 16px; color: var(--text); }
+      .hello i { color: var(--text-2); }
+      html[data-theme="dark"] .hello { text-shadow: 0 1px 14px rgba(0, 0, 0, 0.35); }
+      .composer { display: flex; align-items: flex-start; gap: 10px; padding: 10px 10px 10px 20px; border-radius: 28px; background: var(--glass); box-shadow: inset 0 0 0 1px var(--glass-stroke), 0 8px 24px rgba(29, 29, 31, 0.08); transition: border-radius 0.2s; }
       .little.multi .composer { border-radius: 22px; }
-      textarea { flex: 1; border: 0; outline: 0; resize: none; background: transparent; font: 430 17px/1.4 var(--sans); color: var(--ink); padding: 7px 0 0; height: 32px; max-height: 148px; overflow-y: auto; user-select: text; cursor: text; }
-      textarea::placeholder { color: rgba(29, 29, 31, 0.4); }
-      .send { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; background: var(--ink-06); color: var(--ink-30); cursor: pointer; transition: background 0.2s, color 0.2s; }
-      .send.on { background: var(--ink); color: #fff; }
+      textarea { flex: 1; border: 0; outline: 0; resize: none; background: transparent; font: 430 17px/1.4 var(--sans); color: var(--text); padding: 7px 0 0; height: 32px; max-height: 148px; overflow-y: auto; user-select: text; cursor: text; }
+      textarea::placeholder { color: var(--text-3); }
+      textarea::-webkit-scrollbar { width: 8px; }
+      textarea::-webkit-scrollbar-thumb { background: var(--text-3); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+      @media (forced-colors: active) { .composer { border: 1px solid ButtonText; } .little { border: 1px solid CanvasText; } }
+      .send { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; background: var(--btn-off-bg); color: var(--btn-off-fg); cursor: pointer; transition: background 0.2s, color 0.2s; }
+      .send.on { background: var(--btn-bg); color: var(--btn-fg); }
+      .send:focus-visible { outline: 2px solid #7fb0dd; outline-offset: 2px; }
       /* Linux can't be relied on for a transparent window: the panel fills it instead. */
       html[data-platform="linux"] body { padding: 0; }
       html[data-platform="linux"] .little { border-radius: 0; box-shadow: none; }

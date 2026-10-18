@@ -26,11 +26,56 @@
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --sans: "Inter Tight", "Segoe UI Variable Text", "Segoe UI", -apple-system, sans-serif;
   --serif: "Newsreader", Georgia, serif;
+  /* Theme tokens. The light values are Hark's light theme; html[data-theme="dark"]
+     (set from Hark's own theme, see appearance.ts) swaps in its dark ones. */
+  --text: #1d1d1f;
+  --text-2: rgba(29, 29, 31, 0.72);
+  --text-3: rgba(29, 29, 31, 0.5);
+  --glass: rgba(255, 255, 255, 0.82);
+  --glass-stroke: rgba(29, 29, 31, 0.08);
+  --card-bg: rgba(255, 255, 255, 0.98);
+  --row-line: rgba(29, 29, 31, 0.07);
+  --btn-bg: #1d1d1f;
+  --btn-fg: #f9f9fa;
+  --btn-off-bg: rgba(29, 29, 31, 0.06);
+  --btn-off-fg: rgba(29, 29, 31, 0.3);
+  --pill-bg: rgba(255, 255, 255, 0.55);
+  --pill-hover: rgba(255, 255, 255, 0.85);
+  --pill-stroke: rgba(29, 29, 31, 0.14);
+  --veil: rgba(255, 255, 255, 0.1);
+  /* Hark's sky. appearance.ts replaces this with the sky image Hark itself is
+     showing (its time-of-day placeholder), so local windows match the app. */
+  --sky-image:
+    radial-gradient(ellipse 70% 46% at 68% 30%, rgba(255, 255, 255, 0.75), transparent 60%),
+    radial-gradient(ellipse 55% 38% at 24% 58%, rgba(255, 255, 255, 0.5), transparent 62%),
+    radial-gradient(ellipse 90% 55% at 82% 92%, rgba(125, 157, 189, 0.55), transparent 65%),
+    linear-gradient(168deg, #7fb0dd 0%, #b6cfe7 42%, #d9e9f6 68%, #ffeed9 118%);
   font-family: var(--sans);
-  color: var(--ink);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+html[data-theme="dark"] {
+  --text: #f5f5f7;
+  --text-2: rgba(245, 245, 247, 0.74);
+  --text-3: rgba(245, 245, 247, 0.52);
+  --glass: rgba(29, 29, 31, 0.72);
+  --glass-stroke: rgba(245, 245, 247, 0.14);
+  --card-bg: rgba(29, 29, 31, 0.9);
+  --row-line: rgba(245, 245, 247, 0.08);
+  --btn-bg: #f5f5f7;
+  --btn-fg: #1d1d1f;
+  --btn-off-bg: rgba(245, 245, 247, 0.08);
+  --btn-off-fg: rgba(245, 245, 247, 0.35);
+  --pill-bg: rgba(29, 29, 31, 0.615);
+  --pill-hover: rgba(29, 29, 31, 0.8);
+  --pill-stroke: rgba(245, 245, 247, 0.14);
+  --veil: rgba(0, 0, 0, 0.26);
+  --sky-image:
+    radial-gradient(ellipse 70% 46% at 68% 30%, rgba(120, 140, 210, 0.25), transparent 60%),
+    linear-gradient(168deg, #161f39 0%, #26305a 55%, #3e4570 100%);
+}
+html[data-theme="dark"] ::selection { background: rgba(127, 176, 221, 0.35); }
 * { box-sizing: border-box; margin: 0; }
 html, body { height: 100%; overflow: hidden; }
 /* Rounded window silhouette. The OS window is a transparent rectangle (see
@@ -57,62 +102,60 @@ html[data-native] .win-close { display: none; }
 html[data-bare] { clip-path: none; }
 html[data-bare]::after { display: none; }
 body {
-  /* Local stand-in for Hark's WebGL sky wallpaper, using its own sky tokens,
-     so splash -> app and app -> settings never flash a foreign colour. */
-  background:
-    radial-gradient(ellipse 70% 46% at 68% 30%, rgba(255, 255, 255, 0.75), transparent 60%),
-    radial-gradient(ellipse 55% 38% at 24% 58%, rgba(255, 255, 255, 0.5), transparent 62%),
-    radial-gradient(ellipse 90% 55% at 82% 92%, rgba(125, 157, 189, 0.55), transparent 65%),
-    linear-gradient(168deg, #7fb0dd 0%, var(--sky-top) 42%, #d9e9f6 68%, var(--sky-bottom) 118%);
+  /* Hark's sky (see --sky-image), so loading screen -> app and app ->
+     settings never flash a foreign colour. */
+  background: var(--sky-image);
   user-select: none;
   cursor: default;
 }
 html[data-bare] body { background: transparent; }
-.sky {
-  background:
-    radial-gradient(ellipse 70% 46% at 68% 30%, rgba(255, 255, 255, 0.75), transparent 60%),
-    radial-gradient(ellipse 55% 38% at 24% 58%, rgba(255, 255, 255, 0.5), transparent 62%),
-    radial-gradient(ellipse 90% 55% at 82% 92%, rgba(125, 157, 189, 0.55), transparent 65%),
-    linear-gradient(168deg, #7fb0dd 0%, var(--sky-top) 42%, #d9e9f6 68%, var(--sky-bottom) 118%);
-}
+.sky { background: var(--sky-image); }
 /* "hark" upright, "desktop" in italic grey, as on the website. */
-.wordmark { font: 400 34px/1 var(--serif); letter-spacing: -0.03em; color: var(--ink); }
-.wordmark em { font-style: italic; color: rgba(29, 29, 31, 0.45); }
+.wordmark { font: 400 34px/1 var(--serif); letter-spacing: -0.03em; color: var(--text); }
+.wordmark em { font-style: italic; color: var(--text-3); }
 /* The app icon: dark rounded tile with the serif h. --s sets the size. */
 .tile { --s: 32px; position: relative; flex: none; width: var(--s); height: var(--s); border-radius: 26%; background: linear-gradient(180deg, #424245 0%, #1b1b1d 100%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 calc(var(--s) * 0.08) calc(var(--s) * 0.22) rgba(29, 29, 31, 0.28); }
 .tile::after { content: ""; position: absolute; inset: 15%; background: linear-gradient(180deg, #fbfbfc 0%, #b8b8be 100%); -webkit-mask: url("./assets/mark.png") center / contain no-repeat; mask: url("./assets/mark.png") center / contain no-repeat; }
 .card {
-  background: var(--card);
+  background: var(--card-bg);
   border-radius: 22px;
   box-shadow: 0 12px 40px rgba(29, 29, 31, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.6);
 }
 .pill-btn {
   appearance: none; border: 0; cursor: pointer;
-  font: inherit; font-size: 14px; font-weight: 520; line-height: 1; color: var(--ink);
-  background: var(--thin); border-radius: 9999px; padding: 10px 18px;
-  box-shadow: inset 0 0 0 1px var(--stroke);
+  font: inherit; font-size: 14px; font-weight: 520; line-height: 1; color: var(--text);
+  background: var(--pill-bg); border-radius: 9999px; padding: 10px 18px;
+  box-shadow: inset 0 0 0 1px var(--pill-stroke);
   transition: background 0.25s var(--ease), transform 0.15s var(--ease);
 }
-.pill-btn:hover { background: rgba(255, 255, 255, 0.85); }
+.pill-btn:hover { background: var(--pill-hover); }
+.pill-btn:focus-visible, .caption button:focus-visible, .win-close:focus-visible { outline: 2px solid #7fb0dd; outline-offset: 2px; }
 .pill-btn:active { transform: scale(0.98); }
-.pill-btn.primary { background: var(--ink); color: #f9f9fa; box-shadow: none; }
-.pill-btn.primary:hover { background: #000; }
+.pill-btn.primary { background: var(--btn-bg); color: var(--btn-fg); box-shadow: none; }
+.pill-btn.primary:hover { filter: brightness(0.9); }
 .muted { color: var(--ink-50); }
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 .win-close {
   appearance: none; border: 0; cursor: pointer; width: 32px; height: 32px;
-  border-radius: 50%; background: var(--thin); color: var(--ink); font-size: 13px;
-  display: grid; place-items: center; box-shadow: inset 0 0 0 1px var(--stroke);
+  border-radius: 50%; background: var(--pill-bg); color: var(--text); font-size: 13px;
+  display: grid; place-items: center; box-shadow: inset 0 0 0 1px var(--pill-stroke);
 }
 .win-close:hover { background: #e81123; color: #fff; }
 /* The same window controls Hark's main window gets (bridge.js), for local pages that fill a window. */
-.caption { position: fixed; top: 14px; right: 16px; z-index: 10; display: flex; gap: 2px; padding: 4px; border-radius: 9999px; background: rgba(255, 255, 255, 0.55); backdrop-filter: blur(16px) saturate(1.4); box-shadow: inset 0 0 0 1px rgba(29, 29, 31, 0.08), 0 4px 18px rgba(29, 29, 31, 0.08); }
-.caption button { appearance: none; border: 0; background: transparent; width: 40px; height: 40px; border-radius: 9999px; display: grid; place-items: center; color: var(--ink); cursor: pointer; padding: 0; }
-.caption button:hover { background: rgba(29, 29, 31, 0.07); }
+.caption { position: fixed; top: 14px; right: 16px; z-index: 10; display: flex; gap: 2px; padding: 4px; border-radius: 9999px; background: var(--pill-bg); backdrop-filter: blur(16px) saturate(1.4); box-shadow: inset 0 0 0 1px var(--glass-stroke), 0 4px 18px rgba(29, 29, 31, 0.08); }
+.caption button { appearance: none; border: 0; background: transparent; width: 40px; height: 40px; border-radius: 9999px; display: grid; place-items: center; color: var(--text); cursor: pointer; padding: 0; }
+.caption button:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
 .caption button.close:hover { background: #e81123; color: #fff; }
 html:not([data-platform="windows"]) .caption { display: none; }
 ::selection { background: rgba(127, 176, 221, 0.45); }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+/* Windows high contrast: shadows and tinted glass vanish there, so give every
+   control a real border in the system's own colours. */
+@media (forced-colors: active) {
+  .pill-btn, .win-close, .caption, .caption button, .card { border: 1px solid ButtonText; }
+  .pill-btn.primary { background: Highlight; color: HighlightText; forced-color-adjust: none; }
+  .tile { forced-color-adjust: none; }
 }
