@@ -317,8 +317,10 @@
       "::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--text-primary,#1d1d1f) 38%,transparent);border:2px solid transparent;background-clip:content-box}",
       "::-webkit-scrollbar-track{background:transparent}",
       "::selection{background:rgba(127,176,221,.45)}",
-      "#hark-offline{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:2147483646;background:var(--regular-solid-bg,rgba(255,255,255,.98));color:var(--text-primary,#1d1d1f);border-radius:18px;padding:14px 20px;font:500 14px 'GT Standard L','Segoe UI',sans-serif;box-shadow:0 12px 40px rgba(29,29,31,.18);display:none;align-items:center;gap:12px}",
-      "#hark-offline button{appearance:none;border:0;cursor:pointer;background:var(--fill-primary,#1d1d1f);color:var(--text-primary-on,#f9f9fa);font:inherit;font-size:13px;font-weight:500;border-radius:9999px;padding:8px 14px}"
+      "#hark-offline{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:2147483646;background:var(--regular-solid-bg,rgba(255,255,255,.98));color:var(--text-primary,#1d1d1f);border-radius:18px;padding:14px 20px;font:500 14px 'GT Standard L','Segoe UI',sans-serif;box-shadow:0 12px 40px rgba(29,29,31,.18);display:none;align-items:center;gap:12px;width:max-content;max-width:calc(100vw - 48px);box-sizing:border-box}",
+      "#hark-offline button{appearance:none;border:0;cursor:pointer;white-space:nowrap;background:var(--fill-primary,#1d1d1f);color:var(--text-primary-on,#f9f9fa);font:inherit;font-size:13px;font-weight:500;border-radius:9999px;padding:8px 14px}",
+      /* Windows high contrast drops shadows and tints: outline in system colours, as shell.css does. */
+      "@media (forced-colors:active){#hark-offline{border:1px solid CanvasText}#hark-offline button{border:1px solid ButtonText}}"
     ];
     if (isWindows()) {
       /* The window controls live in the page on Windows only; Search and Settings
@@ -331,7 +333,8 @@
         "#hark-caption{position:fixed;top:14px;right:16px;z-index:2147483646;display:flex;gap:2px;padding:4px;border-radius:9999px;background:var(--thin-bg,rgba(255,255,255,.55));backdrop-filter:blur(16px) saturate(1.4);-webkit-backdrop-filter:blur(16px) saturate(1.4);box-shadow:inset 0 0 0 1px var(--stroke-secondary,rgba(29,29,31,.08)),0 4px 18px rgba(0,0,0,.08);font-family:'GT Standard L','Segoe UI Variable Text','Segoe UI',sans-serif}",
         "#hark-caption button{appearance:none;border:0;background:transparent;width:40px;height:40px;border-radius:9999px;display:grid;place-items:center;color:var(--text-primary,#1d1d1f);cursor:pointer;padding:0}",
         "#hark-caption button:hover{background:color-mix(in srgb,currentColor 9%,transparent)}",
-        "#hark-caption button.hark-close:hover{background:#e81123;color:#fff}"
+        "#hark-caption button.hark-close:hover{background:#e81123;color:#fff}",
+        "@media (forced-colors:active){#hark-caption,#hark-caption button{border:1px solid ButtonText}}"
       );
     }
     css = css.join("\n");

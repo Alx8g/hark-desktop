@@ -35,12 +35,6 @@
       .segs.continuous { display: block; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
       .segs.continuous i { display: block; height: 100%; border-radius: 2px; background: #fff; transition: width 0.6s var(--ease-out); }
       .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-      @media (forced-colors: active) {
-        .isl { border: 1px solid CanvasText; }
-        .segs i, .sliver { background: GrayText; forced-color-adjust: none; }
-        .segs i.d, .segs i.c, .sliver b, .segs.continuous i { background: Highlight; animation: none; }
-        .btn, .x { border: 1px solid ButtonText; }
-      }
       @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
       .btns { display: flex; gap: 6px; margin-top: 12px; }
       .btn { appearance: none; border: 0; cursor: pointer; font: 520 12.5px/1 var(--sans); padding: 8px 13px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); color: #fff; }
@@ -71,6 +65,13 @@
       .isl.done .sliver { background: rgba(13, 29, 51, 0.15); }
       .isl.done::before { content: ""; position: absolute; inset: 0; z-index: 0; background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.65) 50%, transparent 70%); background-size: 260% 100%; animation: sweep 1.3s 0.15s ease-out both; pointer-events: none; }
       @keyframes sweep { from { background-position: 160% 0; } to { background-position: -100% 0; } }
+      /* Windows high contrast. Last, so it wins over the rules above. */
+      @media (forced-colors: active) {
+        .isl { border: 1px solid CanvasText; }
+        .segs i, .sliver, .isl.done .sliver { background: GrayText; forced-color-adjust: none; }
+        .segs i.d, .segs i.c, .sliver b, .segs.continuous i { background: Highlight; box-shadow: none; animation: none; }
+        .btn, .x { border: 1px solid ButtonText; }
+      }
     </style>
   </head>
   <body>
