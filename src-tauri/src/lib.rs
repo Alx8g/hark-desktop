@@ -419,6 +419,7 @@ pub struct AppState {
     /* The last taskbar progress, put back when Plan progress is turned on. */
     last_progress: Mutex<Option<u64>>,
     /* Whether WebView2 has been told Hark's page is on screen (set_page_visible). */
+    #[cfg(windows)]
     page_visible: AtomicBool,
 }
 
@@ -2180,7 +2181,9 @@ fn tray_icon(plan: &PlanView, unread: bool) -> Option<Image<'static>> {
 /* Straight-alpha "source over" of one RGBA layer onto another of the same size. */
 #[cfg(not(target_os = "macos"))]
 fn blend_over(dst: &mut [u8], src: &[u8]) {
-    for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+    let (dst, _) = dst.as_chunks_mut::<4>();
+    let (src, _) = src.as_chunks::<4>();
+    for (d, s) in dst.iter_mut().zip(src) {
         let sa = f32::from(s[3]) / 255.0;
         if sa <= 0.0 {
             continue;
@@ -2659,6 +2662,7 @@ pub fn run() {
             island_ok: AtomicBool::new(true),
             tray_key: Mutex::new(String::new()),
             last_progress: Mutex::new(None),
+            #[cfg(windows)]
             page_visible: AtomicBool::new(true),
         })
         .invoke_handler(tauri::generate_handler![
