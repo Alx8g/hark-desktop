@@ -11,19 +11,17 @@ const WORDS: Record<Platform, Record<string, string>> = {
   windows: {},
   macos: {
     "autostart-title": "Open at login",
-    "autostart-help": "Hark starts in the menu bar when you log in, so your morning brief can find you.",
+    "autostart-help": "Hark starts in the menu bar when you log in.",
     "tray-title": "Keep running in the menu bar",
-    "tray-help": "Closing the window hides Hark instead of quitting. Quit with ⌘Q or from the menu bar icon.",
-    "notifications-help": "Notifications for new messages, briefs and finished Handoff plans while Hark is in the background.",
-    "progress-help": "While a Handoff plan runs, show it at the top of the screen and on the Hark icon in the Dock.",
+    "tray-help": "Closing the window hides Hark. Quit with ⌘Q.",
+    "progress-help": "Show running plans at the top of the screen and in the Dock.",
   },
   linux: {
     "autostart-title": "Start at login",
-    "autostart-help": "Hark starts hidden when you log in, so your morning brief can find you.",
+    "autostart-help": "Hark starts hidden when you log in.",
     "tray-title": "Keep running in the system tray",
-    "tray-help": "Closing the window hides Hark instead of quitting. Needs a system tray (GNOME needs an AppIndicator extension).",
-    "notifications-help": "Desktop notifications for new messages, briefs and finished Handoff plans while Hark is in the background.",
-    "progress-help": "While a Handoff plan runs, show it in the tray icon and on the launcher icon, on desktops that support it.",
+    "tray-help": "Needs a system tray (on GNOME, an AppIndicator extension).",
+    "progress-help": "Show running plans in the tray and on the launcher icon.",
   },
 };
 
@@ -48,6 +46,7 @@ type Settings = {
   close_to_tray: boolean;
   notifications: boolean;
   taskbar_progress: boolean;
+  quick_sends: boolean;
 };
 
 const binds: Array<[string, keyof Settings]> = [
@@ -55,6 +54,7 @@ const binds: Array<[string, keyof Settings]> = [
   ["tray", "close_to_tray"],
   ["notifications", "notifications"],
   ["progress", "taskbar_progress"],
+  ["quick-sends", "quick_sends"],
 ];
 
 async function init() {

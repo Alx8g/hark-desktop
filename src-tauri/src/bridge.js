@@ -642,8 +642,9 @@
     if (el) { el.focus(); return true; }
     return false;
   }
-  /* Put quick-ask text in Hark's message box. If Hark is on another page, go to
-   * Chat first and wait for the box; if the box already holds a half-written
+  /* Put quick-ask text in Hark's message box, and send it unless the user has
+   * turned "Send from quick ask" off. If Hark is on another page, go to Chat
+   * first and wait for the box; if the box already holds a half-written
    * message, add the new text below it rather than replacing it. The text is
    * kept in sessionStorage until it is in, so going to Chat (even by a full page
    * load) loses nothing; if it can't be put in, the shell is told and puts it
@@ -673,28 +674,41 @@
     try { el.setSelectionRange(value.length, value.length); } catch (e) { /* not a text field */ }
     return true;
   }
-  function insertComposerText(emit, text, tries) {
+  /* Hark's send button is the dictation button until the box holds text, so it
+   * is pressed only once it says "Send message"; otherwise the text stays
+   * drafted. */
+  function sendWhenReady(done, tries) {
+    tries = tries || 0;
+    var btn = document.querySelector('[data-testid="send-button"]');
+    var label = btn ? (btn.getAttribute("aria-label") || "") : "";
+    if (btn && !btn.disabled && /^send(\s|$)/i.test(label)) { btn.click(); done(true); return; }
+    if (tries < 25) setTimeout(function () { sendWhenReady(done, tries + 1); }, 80);
+    else done(false);
+  }
+  function insertComposerText(emit, text, send, tries) {
     tries = tries || 0;
     var el = document.querySelector('[data-testid="chat-input"]');
     if (!el) {
       if (!tries) {
-        try { sessionStorage.setItem(COMPOSE_KEY, text); } catch (e) { /* storage blocked */ }
+        try { sessionStorage.setItem(COMPOSE_KEY, JSON.stringify({ text: text, send: send })); } catch (e) { /* storage blocked */ }
         clickAria("Chat");
       }
-      if (tries < 80) setTimeout(function () { insertComposerText(emit, text, tries + 1); }, 100);
+      if (tries < 80) setTimeout(function () { insertComposerText(emit, text, send, tries + 1); }, 100);
       else { try { sessionStorage.removeItem(COMPOSE_KEY); } catch (e) { /* storage blocked */ } emit("hark-compose-result", { ok: false, text: text }); }
       return;
     }
     var ok = false;
     try { ok = putText(el, text); } catch (e) { ok = false; }
     try { sessionStorage.removeItem(COMPOSE_KEY); } catch (e) { /* storage blocked */ }
-    emit("hark-compose-result", ok ? { ok: true } : { ok: false, text: text });
+    if (!ok) { emit("hark-compose-result", { ok: false, text: text }); return; }
+    if (!send) { emit("hark-compose-result", { ok: true, sent: false }); return; }
+    sendWhenReady(function (sent) { emit("hark-compose-result", { ok: true, sent: sent }); });
   }
   /* Text that was on its way in when the page loaded again. */
   function resumeCompose(emit) {
-    var text = "";
-    try { text = sessionStorage.getItem(COMPOSE_KEY) || ""; } catch (e) { text = ""; }
-    if (text) insertComposerText(emit, text, 1);
+    var saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem(COMPOSE_KEY) || "null"); } catch (e) { saved = null; }
+    if (saved && typeof saved.text === "string" && saved.text) insertComposerText(emit, saved.text, !!saved.send, 1);
   }
   /* The plan island's Open: press that plan's own button in Hark. */
   function openPlan(title) {
@@ -721,7 +735,7 @@
     on("hark-focus-composer", function () { focusComposer(); });
     on("hark-compose", function (ev) {
       var text = ev && ev.payload && ev.payload.text ? String(ev.payload.text) : "";
-      if (text) insertComposerText(emit, text);
+      if (text) insertComposerText(emit, text, !!(ev.payload && ev.payload.send));
       else focusComposer();
     });
     on("hark-open-plan", function (ev) {
