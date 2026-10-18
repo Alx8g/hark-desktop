@@ -1,7 +1,7 @@
 {
   "name": "hark-desktop",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "A lightweight, unofficial desktop client for Hark (hark.com)",
   "license": "MIT",
   "type": "module",
