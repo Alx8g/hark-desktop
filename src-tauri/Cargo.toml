@@ -1,6 +1,6 @@
 [package]
 name = "hark-windows"
-version = "0.2.1"
+version = "0.2.2"
 description = "Hark Desktop: a lightweight, unofficial native client for hark.com"
 authors = ["Hark Desktop contributors"]
 license = "MIT"
