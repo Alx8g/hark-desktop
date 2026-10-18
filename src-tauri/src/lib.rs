@@ -369,6 +369,8 @@ pub struct Settings {
     pub close_to_tray: bool,
     pub notifications: bool,
     pub taskbar_progress: bool,
+    /* Enter in the quick ask sends the message; off, Hark opens with it drafted. */
+    pub quick_sends: bool,
 }
 
 impl Default for Settings {
@@ -382,6 +384,7 @@ impl Default for Settings {
             close_to_tray: !cfg!(target_os = "linux"),
             notifications: true,
             taskbar_progress: true,
+            quick_sends: true,
         }
     }
 }
@@ -637,6 +640,7 @@ fn load_settings(app: &AppHandle) -> Settings {
         grab("close_to_tray", &mut settings.close_to_tray);
         grab("notifications", &mut settings.notifications);
         grab("taskbar_progress", &mut settings.taskbar_progress);
+        grab("quick_sends", &mut settings.quick_sends);
     }
     settings
 }
@@ -647,6 +651,7 @@ fn persist_settings(app: &AppHandle, settings: &Settings) {
         store.set("close_to_tray", json!(settings.close_to_tray));
         store.set("notifications", json!(settings.notifications));
         store.set("taskbar_progress", json!(settings.taskbar_progress));
+        store.set("quick_sends", json!(settings.quick_sends));
         let _ = store.save();
     }
 }
@@ -688,6 +693,7 @@ fn set_setting(app: AppHandle, key: String, value: bool) -> Result<(), String> {
             "close_to_tray" => settings.close_to_tray = value,
             "notifications" => settings.notifications = value,
             "taskbar_progress" => settings.taskbar_progress = value,
+            "quick_sends" => settings.quick_sends = value,
             other => return Err(format!("unknown setting: {other}")),
         }
         settings.clone()
@@ -768,11 +774,18 @@ fn quick_compose(app: AppHandle, text: String) {
     }
 }
 
+/* Hand quick-ask text to Hark's message box; bridge.js sends it too unless
+ * "Send from quick ask" is off. */
 fn deliver_compose(app: &AppHandle, text: String, delay_ms: u64) {
     let handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(delay_ms));
-        let _ = handle.emit_to("main", "hark-compose", json!({ "text": text }));
+        let send = settings_snapshot(&handle).quick_sends;
+        let _ = handle.emit_to(
+            "main",
+            "hark-compose",
+            json!({ "text": text, "send": send }),
+        );
     });
 }
 
@@ -1049,7 +1062,7 @@ fn open_settings(app: &AppHandle) {
     ))
     .title("Hark Desktop settings")
     .initialization_script(appearance_script(app))
-    .inner_size(540.0, 660.0)
+    .inner_size(540.0, 690.0)
     .min_inner_size(460.0, 520.0)
     .center()
     .resizable(true)
@@ -2957,6 +2970,11 @@ mod tests {
         let plan = clean_plan("Big", 900, 100_000).expect("plan");
         assert_eq!((plan.done, plan.total), (64, 64));
         assert!(clean_plan("", 1, 2).is_none() && clean_plan("x", 0, 0).is_none());
+    }
+
+    #[test]
+    fn quick_ask_sends_unless_turned_off() {
+        assert!(Settings::default().quick_sends);
     }
 
     #[test]
