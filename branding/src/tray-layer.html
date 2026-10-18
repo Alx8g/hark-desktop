@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- One 64x64 layer of the Windows and Linux tray icon. lib.rs stacks them at runtime to fill
+     the tile with Hark's sky as a Handoff plan runs: ?l=base (dark tile), sky, done, glyph (the h), dot (unread). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="brand.css" />
+    <style>
+      html, body { margin: 0; width: 64px; height: 64px; background: transparent; overflow: hidden; }
+      .tile { --s: 64px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
+      .tile::after { inset: 11%; filter: none; }
+      .no-glyph::after { display: none; }
+      .tile.fill-sky { background: linear-gradient(180deg, #b4d4f2 0%, #7fb0dd 100%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3); }
+      .tile.fill-done { background: linear-gradient(180deg, #ffe0bf 0%, #9cc4ea 100%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3); }
+      .tile.glyph { background: transparent; box-shadow: none; }
+      .tile.glyph::after { filter: drop-shadow(0 1px 1.5px rgba(10, 30, 60, 0.45)); }
+      .dot { position: absolute; right: 1px; top: 1px; width: 22px; height: 22px; border-radius: 50%; background: #ff4d00; box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.96); }
+    </style>
+  </head>
+  <body>
+    <script>
+      const l = new URLSearchParams(location.search).get("l");
+      document.body.innerHTML = l === "dot" ? '<div class="dot"></div>' : `<div class="tile ${{ base: "no-glyph", sky: "no-glyph fill-sky", done: "no-glyph fill-done", glyph: "glyph" }[l]}"></div>`;
+    </script>
+  </body>
+</html>

@@ -3,6 +3,7 @@
 //
 //   node branding/build.mjs            render everything
 //   BROWSER=/path/to/chrome node ...   pick a specific browser
+//   ONLY=tray-layers node ...           render only the outputs whose path contains this
 //
 // The installer images are written as 24-bit BMP, the only format NSIS accepts.
 import { spawn } from "node:child_process";
@@ -18,8 +19,8 @@ const JOBS = [
   // The mark first: every other page masks it. `mask` crops the glyph, centres it and writes a 512px white-on-transparent PNG.
   { page: "branding/src/mark.html", w: 1024, h: 1024, scale: 1, out: "branding/mark.png", transparent: true, mask: true },
   { page: "branding/src/appicon.html", w: 1024, h: 1024, scale: 1, out: "src-tauri/icons/source.png", transparent: true },
-  { page: "branding/src/tray.html", w: 64, h: 64, scale: 1, out: "src-tauri/icons/tray.png", transparent: true },
-  { page: "branding/src/tray-dot.html", w: 64, h: 64, scale: 1, out: "src-tauri/icons/tray-dot.png", transparent: true },
+  // Layers lib.rs stacks at runtime to fill the tray icon with sky while a Handoff plan runs.
+  ...["base", "sky", "done", "glyph", "dot"].map((l) => ({ page: `branding/src/tray-layer.html?l=${l}`, w: 64, h: 64, scale: 1, out: `src-tauri/icons/tray-layers/${l}.png`, transparent: true })),
   { page: "branding/src/tray-template.html", w: 44, h: 44, scale: 1, out: "src-tauri/icons/tray-template.png", transparent: true },
   { page: "branding/src/tray-template-dot.html", w: 44, h: 44, scale: 1, out: "src-tauri/icons/tray-template-dot.png", transparent: true },
   { page: "branding/src/sidebar.html", w: 164, h: 314, scale: 4, out: "src-tauri/windows/sidebar.bmp", bmp: true },
@@ -96,7 +97,8 @@ function encodeBmp(width, height, rgba) {
 
 try {
   for (const job of JOBS) {
-    if (!existsSync(join(root, job.page))) { console.log(`skip ${job.page} (not written yet)`); continue; }
+    if (process.env.ONLY && !job.out.includes(process.env.ONLY)) continue;
+    if (!existsSync(join(root, job.page.split("?")[0]))) { console.log(`skip ${job.page} (not written yet)`); continue; }
     await send("Page.enable");
     await send("Emulation.setDeviceMetricsOverride", { width: job.w, height: job.h, deviceScaleFactor: job.scale, mobile: false });
     await send("Emulation.setDefaultBackgroundColorOverride", job.transparent ? { color: { r: 0, g: 0, b: 0, a: 0 } } : {});

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en" data-bare>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hark plan</title>
+    <link rel="stylesheet" href="/src/shell.css" />
+    <style>
+      /* A Handoff plan's live island at the top centre of the screen. The window is
+         transparent and lets clicks through everywhere except the pill (lib.rs). */
+      .isl { --spring: cubic-bezier(0.3, 1.25, 0.5, 1); position: absolute; left: 50%; top: 10px; width: 336px; padding: 6px 14px 6px 6px; border-radius: 24px; overflow: hidden; transform: translateX(-50%); background: #121214; color: #f4f4f5; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.07); transition: width 0.42s var(--spring), padding 0.42s var(--spring), border-radius 0.3s, transform 0.5s var(--spring), opacity 0.3s, background 0.6s, color 0.4s, box-shadow 0.5s; }
+      .isl::after { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; background: linear-gradient(90deg, rgba(127, 176, 221, 0.6), rgba(255, 255, 255, 0.12) 50%, rgba(255, 217, 184, 0.5)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; }
+      .isl > *:not(.sliver) { position: relative; z-index: 1; }
+      .isl.gone { opacity: 0; transform: translateX(-50%) translateY(-70px) scale(0.92); }
+      /* tucked: only the bottom few pixels, with the line of sky, stay on screen */
+      .isl.tucked { transform: translateX(-50%) translateY(calc(-100% - 5px)); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); }
+      .row { display: flex; align-items: center; gap: 10px; min-height: 32px; }
+      .ring { position: relative; flex: none; width: 32px; height: 32px; display: grid; place-items: center; }
+      .ring svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+      .ring .arc { transition: stroke-dasharray 0.6s var(--ease-out); }
+      .ring .tile { --s: 22px; }
+      .tick { display: none; flex: none; width: 32px; height: 32px; border-radius: 50%; place-items: center; background: linear-gradient(180deg, #4f8fd0, #2f6fb3); box-shadow: 0 2px 8px rgba(13, 40, 80, 0.35); }
+      .text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+      .text b { font: 560 13.5px/1.2 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .sub { font: 450 12px/1.2 var(--sans); color: rgba(255, 255, 255, 0.58); font-variant-numeric: tabular-nums; max-height: 0; opacity: 0; overflow: hidden; transition: max-height 0.3s, opacity 0.25s, margin 0.3s; }
+      .count { font: 500 12.5px/1 var(--sans); color: rgba(255, 255, 255, 0.58); font-variant-numeric: tabular-nums; white-space: nowrap; transition: opacity 0.2s; }
+      .more { max-height: 0; opacity: 0; overflow: hidden; transition: max-height 0.42s var(--spring), opacity 0.25s; }
+      .segs { display: flex; gap: 3px; margin-top: 13px; }
+      .segs i { flex: 1; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.14); transition: background 0.4s; }
+      .segs i.d { background: #fff; }
+      .segs i.c { background: linear-gradient(90deg, #7fb0dd, #d3e6f7, #7fb0dd); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
+      @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+      .btns { display: flex; gap: 6px; margin-top: 12px; }
+      .btn { appearance: none; border: 0; cursor: pointer; font: 520 12.5px/1 var(--sans); padding: 8px 13px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); color: #fff; }
+      .btn:hover { background: rgba(255, 255, 255, 0.18); }
+      .btn.primary { background: #fff; color: #111; }
+      .btn.primary:hover { background: #e9eef4; }
+      .open, .x { display: none; }
+      .x { appearance: none; border: 0; cursor: pointer; width: 26px; height: 26px; border-radius: 50%; place-items: center; background: transparent; color: rgba(13, 29, 51, 0.6); padding: 0; }
+      .x:hover { background: rgba(13, 29, 51, 0.1); }
+      .sliver { position: absolute; left: 16px; right: 16px; bottom: 2px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.14); opacity: 0; transition: opacity 0.3s; }
+      .sliver b { display: block; height: 100%; width: 0; border-radius: 2px; background: linear-gradient(90deg, #7fb0dd, #cfe4f7 70%, #ffd9b8); box-shadow: 0 0 6px rgba(160, 200, 240, 0.9); transition: width 0.6s var(--ease-out); }
+      .isl.tucked .sliver { opacity: 1; }
+      /* pointed at: open up (lib.rs tells the page, because the window ignores the mouse until then) */
+      .isl.open-up:not(.done) { width: 430px; padding: 14px 16px 14px 14px; border-radius: 28px; }
+      .isl.open-up:not(.done) .more { max-height: 120px; opacity: 1; }
+      .isl.open-up:not(.done) .sub { max-height: 20px; opacity: 1; margin-top: 3px; }
+      .isl.open-up:not(.done) .count { opacity: 0; }
+      .isl.bump .ring { animation: bump 0.7s var(--ease-out); }
+      @keyframes bump { 35% { transform: scale(1.2); filter: drop-shadow(0 0 7px rgba(143, 192, 238, 0.95)); } }
+      /* finished: Hark's sky, a tick, and Open */
+      .isl.done { width: 410px; padding: 7px 8px 7px 7px; background: linear-gradient(100deg, #6aa3db 0%, #a3cbef 52%, #f7d2b0 100%); color: #0d1d33; box-shadow: 0 14px 40px rgba(20, 60, 110, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
+      .isl.done::after { display: none; }
+      .isl.done .ring, .isl.done .count, .isl.done .more { display: none; }
+      .isl.done .tick { display: grid; }
+      .isl.done .open { display: inline-flex; background: #0d1d33; color: #fff; padding: 8px 14px; font-weight: 600; }
+      .isl.done .x { display: grid; }
+      .isl.done .sub { max-height: 20px; opacity: 1; margin-top: 2px; color: rgba(13, 29, 51, 0.7); }
+      .isl.done .sliver { background: rgba(13, 29, 51, 0.15); }
+      .isl.done::before { content: ""; position: absolute; inset: 0; z-index: 0; background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.65) 50%, transparent 70%); background-size: 260% 100%; animation: sweep 1.3s 0.15s ease-out both; pointer-events: none; }
+      @keyframes sweep { from { background-position: 160% 0; } to { background-position: -100% 0; } }
+    </style>
+  </head>
+  <body>
+    <div class="isl gone" id="isl" role="status" aria-live="polite">
+      <div class="row">
+        <div class="ring"><svg viewBox="0 0 42 42" aria-hidden="true"><circle cx="21" cy="21" r="19" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="2.5"/><circle class="arc" id="arc" cx="21" cy="21" r="19" fill="none" stroke="#7fb0dd" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0 200"/></svg><div class="tile"></div></div>
+        <div class="tick"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.8 10 11 4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="text"><b id="title"></b><span class="sub" id="sub"></span></div>
+        <span class="count" id="count"></span>
+        <button class="btn open" data-act="open">Open</button>
+        <button class="x" data-act="dismiss" aria-label="Dismiss"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2 2 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+      </div>
+      <div class="more">
+        <div class="segs" id="segs"></div>
+        <div class="btns"><button class="btn primary" data-act="open">Open in Hark</button><button class="btn" data-act="hide">Hide until it’s done</button></div>
+      </div>
+      <i class="sliver"><b id="sliver"></b></i>
+    </div>
+    <script type="module" src="/src/island.ts"></script>
+  </body>
+</html>

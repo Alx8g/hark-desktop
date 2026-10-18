@@ -8,13 +8,13 @@
     <style>
       body { display: flex; flex-direction: column; }
       header { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 8px; }
-      header h1 { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
-      header h1 em { font-family: Georgia, serif; font-style: italic; font-weight: 400; color: var(--ink-70); }
+      header h1 { font: 400 24px/1 var(--serif); letter-spacing: -0.02em; }
+      header h1 em { font-style: italic; color: rgba(29, 29, 31, 0.45); }
       main { padding: 8px 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
       .group { padding: 6px 16px; }
       .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; }
       .row + .row { border-top: 1px solid rgba(29,29,31,.07); }
-      .row b { font-size: 14px; font-weight: 550; display: block; }
+      .row b { font-size: 14px; font-weight: 560; display: block; }
       .row span { font-size: 12.5px; color: var(--ink-50); display: block; margin-top: 2px; line-height: 1.35; }
       .switch { position: relative; flex: none; width: 46px; height: 28px; border-radius: 999px; background: rgba(29,29,31,.18); border: 0; cursor: pointer; transition: background .25s var(--ease); }
       .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); transition: transform .25s var(--ease); }
@@ -31,7 +31,7 @@
   </head>
   <body>
     <header class="drag" data-tauri-drag-region>
-      <h1>hark <em>pro</em> <span id="for-platform">for Windows</span></h1>
+      <h1>hark <em>desktop</em></h1>
       <button class="win-close no-drag" id="close" aria-label="Close settings">✕</button>
     </header>
     <main>
@@ -39,11 +39,11 @@
         <div class="row"><div><b id="autostart-title">Start with Windows</b><span id="autostart-help">Hark waits in the tray from sign-in, so your morning brief can find you.</span></div><button class="switch" id="autostart" role="switch" aria-checked="true" aria-labelledby="autostart-title"></button></div>
         <div class="row"><div><b id="tray-title">Keep running in tray</b><span id="tray-help">Closing the window hides Hark instead of quitting. Quit from the tray icon.</span></div><button class="switch" id="tray" role="switch" aria-checked="true" aria-labelledby="tray-title"></button></div>
         <div class="row"><div><b>Notifications</b><span id="notifications-help">Windows toasts for new messages, briefs and finished Handoff plans while Hark is in the background.</span></div><button class="switch" id="notifications" role="switch" aria-checked="true" aria-label="Notifications"></button></div>
-        <div class="row"><div><b id="progress-title">Taskbar progress</b><span id="progress-help">Mirror Handoff plan steps (for example 3 of 8) onto the Windows taskbar button.</span></div><button class="switch" id="progress" role="switch" aria-checked="true" aria-labelledby="progress-title"></button></div>
+        <div class="row"><div><b id="progress-title">Plan progress</b><span id="progress-help">While a Handoff plan runs, show it at the top of the screen, in the tray icon and on the taskbar button.</span></div><button class="switch" id="progress" role="switch" aria-checked="true" aria-labelledby="progress-title"></button></div>
       </section>
       <section class="card group" aria-label="Shortcuts">
         <div class="row"><div class="keys">
-          <div><span class="combo"><kbd class="mod">Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></span>Show Hark / jump to the message box</div>
+          <div><span class="combo"><kbd class="mod">Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></span>Ask Hark from anywhere. In Hark, jumps to the message box.</div>
           <div><span class="combo"><kbd class="mod">Ctrl</kbd>+<kbd>,</kbd></span>Desktop settings</div>
           <div><span class="combo"><kbd class="mod">Ctrl</kbd>+<kbd>R</kbd></span>Reload Hark</div>
           <div id="f11"><span class="combo"><kbd>F11</kbd></span>Full screen</div>

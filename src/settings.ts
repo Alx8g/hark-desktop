@@ -9,24 +9,20 @@ import { platform, type Platform } from "./platform";
 const WORDS: Record<Platform, Record<string, string>> = {
   windows: {},
   macos: {
-    "for-platform": "for macOS",
     "autostart-title": "Open at login",
     "autostart-help": "Hark waits in the menu bar from login, so your morning brief can find you.",
     "tray-title": "Keep running in the menu bar",
     "tray-help": "Closing the window hides Hark instead of quitting. Quit with ⌘Q or from the menu bar icon.",
     "notifications-help": "Notifications for new messages, briefs and finished Handoff plans while Hark is in the background.",
-    "progress-title": "Dock progress",
-    "progress-help": "Mirror Handoff plan steps (for example 3 of 8) onto the Hark icon in the Dock.",
+    "progress-help": "While a Handoff plan runs, show it at the top of the screen and on the Hark icon in the Dock.",
   },
   linux: {
-    "for-platform": "for Linux",
     "autostart-title": "Start at login",
     "autostart-help": "Hark starts hidden when you log in, so your morning brief can find you.",
     "tray-title": "Keep running in the system tray",
     "tray-help": "Closing the window hides Hark instead of quitting. Needs a system tray (GNOME needs an AppIndicator extension).",
     "notifications-help": "Desktop notifications for new messages, briefs and finished Handoff plans while Hark is in the background.",
-    "progress-title": "Launcher progress",
-    "progress-help": "Mirror Handoff plan steps (for example 3 of 8) onto the launcher icon, on desktops that support it.",
+    "progress-help": "While a Handoff plan runs, show it in the tray icon and on the launcher icon, on desktops that support it.",
   },
 };
 

@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 
-// Local shell pages only (splash / settings / offline / quick capture).
+// Local shell pages only (loading screen, settings, quick ask, plan island).
 // The main Hark experience is the real https://hark.com loaded in WebView2.
 export default defineConfig({
   clearScreen: false,
@@ -20,8 +20,8 @@ export default defineConfig({
       input: {
         splash: resolve(__dirname, "index.html"),
         settings: resolve(__dirname, "settings.html"),
-        offline: resolve(__dirname, "offline.html"),
         quick: resolve(__dirname, "quick.html"),
+        island: resolve(__dirname, "island.html"),
       },
     },
   },
