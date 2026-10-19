@@ -81,5 +81,16 @@
         "installerHooks": "windows/hooks.nsh"
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENEQThFOEJGOTU3QTEwMTUKUldRVkVIcVZ2K2lvemZnTkl4Z0N3cTl5SEw2OStDTnhkemhNZGpJT0tJS0hmUWVpRkxJb1l1b3IK",
+      "endpoints": [
+        "https://github.com/Alx8g/hark-desktop/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
