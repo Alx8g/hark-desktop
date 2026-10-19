@@ -63,3 +63,22 @@ jobs:
       - name: Test
         working-directory: src-tauri
         run: cargo test
+
+  setup:
+    name: Windows setup
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-setup
+      # Built without the installer it carries in releases (that comes from tauri build), which is enough to check it.
+      - name: Format
+        working-directory: src-setup
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: src-setup
+        run: cargo clippy --all-targets -- -D warnings

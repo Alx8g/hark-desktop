@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Hark Setup</title>
+<style>
+@font-face { font-family: "Inter Tight"; font-weight: 100 900; src: url(data:font/woff2;base64,__INTER__) format("woff2"); }
+@font-face { font-family: "Newsreader"; font-weight: 200 800; src: url(data:font/woff2;base64,__NEWS__) format("woff2"); }
+@font-face { font-family: "Newsreader"; font-style: italic; font-weight: 200 800; src: url(data:font/woff2;base64,__NEWSI__) format("woff2"); }
+
+:root {
+  --ink: #1d1d1f;
+  --ink-60: rgba(29, 29, 31, 0.6);
+  --ink-45: rgba(29, 29, 31, 0.45);
+  --sans: "Inter Tight", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --serif: "Newsreader", Georgia, serif;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; overflow: hidden; }
+/* Hark's sky, the same layers as the app's loading screen and the website's panels. */
+body {
+  color: var(--ink); font: 450 15px/1.4 var(--sans); -webkit-font-smoothing: antialiased; user-select: none; cursor: default;
+  background:
+    radial-gradient(ellipse 70% 46% at 68% 30%, rgba(255, 255, 255, 0.75), transparent 60%),
+    radial-gradient(ellipse 55% 38% at 24% 58%, rgba(255, 255, 255, 0.5), transparent 62%),
+    radial-gradient(ellipse 90% 55% at 82% 92%, rgba(125, 157, 189, 0.55), transparent 65%),
+    linear-gradient(168deg, #7fb0dd 0%, #b6cfe7 42%, #d9e9f6 68%, #ffeed9 118%);
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+
+.close { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border: 0; border-radius: 50%; display: grid; place-items: center; padding: 0; background: rgba(255, 255, 255, 0.5); color: var(--ink-60); transition: background 0.15s, opacity 0.2s; }
+.close:hover { background: rgba(255, 255, 255, 0.85); color: var(--ink); }
+body.busy .close { opacity: 0; pointer-events: none; }
+
+main { position: absolute; left: 40px; top: 40px; right: 40px; bottom: 36px; display: flex; flex-direction: column; }
+.tile { position: relative; width: 56px; height: 56px; border-radius: 26%; background: linear-gradient(180deg, #424245 0%, #1b1b1d 100%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 4px 12px rgba(29, 29, 31, 0.28); }
+.tile::after { content: ""; position: absolute; inset: 15%; background: linear-gradient(180deg, #fbfbfc 0%, #b8b8be 100%); -webkit-mask: url(data:image/png;base64,__MARK__) center / contain no-repeat; }
+h1 { font: 400 54px/1 var(--serif); letter-spacing: -0.035em; margin-top: 28px; }
+h1 i { color: var(--ink-45); }
+
+.foot { margin-top: auto; position: relative; height: 50px; }
+#go { position: absolute; left: 0; top: 0; height: 50px; width: 150px; border: 0; border-radius: 999px; overflow: hidden; padding: 0; background: var(--ink); color: #fff; font-size: 15.5px; font-weight: 560; transition: width 0.5s var(--ease), background 0.3s, color 0.3s; }
+#go:hover { background: #000; }
+#go .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: rgba(255, 255, 255, 0.92); transition: width 0.35s ease-out; }
+#go b { position: relative; font-weight: inherit; }
+body.busy #go { width: 440px; background: rgba(255, 255, 255, 0.42); color: var(--ink); cursor: default; }
+body.done #go { width: 170px; }
+body.done #go .fill { opacity: 0; transition: opacity 0.2s; }
+.note { position: absolute; right: 0; bottom: 6px; font-size: 12.5px; color: var(--ink-45); transition: opacity 0.25s; }
+.note a { color: var(--ink-60); }
+.note a:hover { color: var(--ink); }
+body.busy .note { opacity: 0; }
+.problem { display: none; }
+body.failed .problem { display: inline; }
+body.failed .legal { display: none; }
+
+@media (forced-colors: active) {
+  #go, .close { border: 1px solid ButtonText; }
+  #go .fill { background: Highlight; }
+}
+</style>
+</head>
+<body>
+<button class="close" aria-label="Close" title="Close"><svg width="11" height="11" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2 2 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+<main>
+  <span class="tile" aria-hidden="true"></span>
+  <h1>Hark <i>desktop</i></h1>
+  <div class="foot">
+    <button id="go"><span class="fill"></span><b aria-live="polite">Install</b></button>
+    <span class="note"><span class="legal">Unofficial app, not made by Hark.</span><span class="problem">Couldn't install. <a href="#" id="standard">Use the standard installer</a></span></span>
+  </div>
+</main>
+<script>
+"use strict";
+const post = (m) => window.ipc.postMessage(m);
+const go = document.getElementById("go"), label = go.querySelector("b"), fill = go.querySelector(".fill");
+let state = "ready";
+const set = (s, text) => {
+  state = s;
+  document.body.className = s;
+  if (text) label.textContent = text;
+};
+
+go.addEventListener("click", () => {
+  if (state === "ready" || state === "failed") {
+    fill.style.width = "0";
+    set("busy", "Installing");
+    go.disabled = true;
+    post("install");
+  } else if (state === "done") {
+    post("open");
+  }
+});
+document.querySelector(".close").addEventListener("click", () => post("close"));
+document.getElementById("standard").addEventListener("click", (e) => { e.preventDefault(); post("standard"); });
+
+// Called by the setup while the standard installer runs, then once it's checked the result.
+window.progress = (p) => { fill.style.width = (p * 100).toFixed(1) + "%"; };
+window.installed = () => {
+  fill.style.width = "100%";
+  setTimeout(() => { set("done", "Open Hark"); go.disabled = false; }, 450);
+};
+window.failed = () => { set("failed", "Try again"); go.disabled = false; };
+
+// The whole card moves the window, except its buttons and link.
+document.addEventListener("mousedown", (e) => { if (e.button === 0 && !e.target.closest("button, a")) post("drag"); });
+// Enter presses the one button and Esc closes, without a focus ring sitting on the button from the start.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state !== "busy") post("close");
+  if (e.key === "Enter" && !e.repeat && (document.activeElement === document.body || document.activeElement === go) && !go.disabled) { e.preventDefault(); go.click(); }
+});
+document.addEventListener("contextmenu", (e) => e.preventDefault());
+document.fonts.ready.then(() => requestAnimationFrame(() => post("ready")));
+</script>
+</body>
+</html>
