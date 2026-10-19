@@ -32,13 +32,17 @@ fn main() {
         fs::read(root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"))
     };
 
-    // The app's version, from the one place it is set.
+    // The app's version, from the one place it is set. HARK_SETUP_VERSION overrides it when the setup is rebuilt for
+    // an earlier release (setup.yml), so it checks for the version it carries.
     let conf: serde_json::Value =
         serde_json::from_slice(&read("src-tauri/tauri.conf.json")).unwrap();
-    let version = conf["version"]
-        .as_str()
-        .expect("tauri.conf.json version")
-        .to_string();
+    println!("cargo:rerun-if-env-changed=HARK_SETUP_VERSION");
+    let version = env::var("HARK_SETUP_VERSION").unwrap_or_else(|_| {
+        conf["version"]
+            .as_str()
+            .expect("tauri.conf.json version")
+            .to_string()
+    });
     println!("cargo:rustc-env=HARK_VERSION={version}");
 
     // The standard installer this setup carries and runs. Release builds point HARK_SETUP_PAYLOAD at the NSIS
