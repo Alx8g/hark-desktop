@@ -1511,7 +1511,7 @@ dependencies = [
 
 [[package]]
 name = "hark-windows"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "serde",
  "serde_json",
