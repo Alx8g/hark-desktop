@@ -1,0 +1,30 @@
+[package]
+name = "hark-setup"
+version = "0.0.0"
+description = "Hark Desktop setup: the sky card that installs Hark on Windows"
+license = "MIT"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "hark-setup"
+path = "src/main.rs"
+
+[target.'cfg(windows)'.dependencies]
+# The same window and WebView2 libraries the app uses (through Tauri), so nothing new is trusted.
+tao = "0.37"
+wry = "0.57"
+winreg = "0.56"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+base64 = "0.22"
+serde_json = "1"
+tauri-winres = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

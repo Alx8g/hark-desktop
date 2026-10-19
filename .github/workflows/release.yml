@@ -45,7 +45,9 @@ jobs:
           targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            src-setup
       - run: pnpm install --frozen-lockfile
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -64,8 +66,23 @@ jobs:
           prerelease: false
           # Update packages and latest.json only here, so builds without the key still work.
           args: ${{ matrix.args }} --config src-tauri/tauri.updater.conf.json
-          # Updates use the per-user setup.exe, the installer people download.
+          # Updates use the per-user setup.exe, which Hark-Desktop-Setup.exe also carries.
           updaterJsonPreferNsis: true
+      # The download people get on Windows: the sky card, carrying the setup.exe built above and running it silently.
+      - name: Build Hark-Desktop-Setup.exe
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $env:HARK_SETUP_PAYLOAD = (Resolve-Path "src-tauri/target/release/bundle/nsis/Hark_${version}_x64-setup.exe").Path
+          cargo build --release --manifest-path src-setup/Cargo.toml
+          New-Item -ItemType Directory -Force setup-out | Out-Null
+          Copy-Item src-setup/target/release/hark-setup.exe setup-out/Hark-Desktop-Setup.exe
+      - name: Attach Hark-Desktop-Setup.exe to the draft release
+        if: runner.os == 'Windows' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.ref_name }} setup-out/Hark-Desktop-Setup.exe --clobber
       - name: Keep the packages from a manual run
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
@@ -79,3 +96,4 @@ jobs:
             src-tauri/target/**/bundle/dmg/*.dmg
             src-tauri/target/**/bundle/msi/*.msi
             src-tauri/target/**/bundle/nsis/*.exe
+            setup-out/*.exe
