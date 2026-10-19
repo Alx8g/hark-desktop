@@ -885,14 +885,24 @@ fn island_dismiss(app: AppHandle) {
 
 /* ---------------------------- native helpers ---------------------------- */
 
-/* Windows: the notification plugin's toast does nothing when clicked, so the
- * same toast is shown here with a click handler that brings Hark up. It
- * names the app the way the plugin does: by the installed app's id (its
- * Start menu entry carries it), or as PowerShell for a build run from a
- * target folder, which has no entry. False if it could not be shown. */
+/* Windows: the notification plugin's toast does nothing when clicked, and
+ * an unpackaged app is not told about clicks on its own (tested: not even a
+ * toast timing out reaches the process). So the toast carries a link,
+ * hark-desktop:open, which Windows itself opens when it is clicked: that
+ * starts Hark, which hands over to the copy already running (single
+ * instance), and Hark comes up. It works for a toast clicked later from the
+ * notification centre too, even if Hark has quit since. The app is named the
+ * way the plugin names it: the installed app's id (its Start menu entry
+ * carries it), or PowerShell for a build run from a target folder.
+ * False if it could not be shown. */
 #[cfg(windows)]
 fn show_clickable_toast(app: &AppHandle, title: &str, body: &str) -> bool {
-    use tauri_winrt_notification::Toast;
+    use windows::core::HSTRING;
+    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+    const POWERSHELL_APP_ID: &str =
+        "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe";
+
     let from_target = std::env::current_exe()
         .ok()
         .and_then(|exe| {
@@ -901,20 +911,65 @@ fn show_clickable_toast(app: &AppHandle, title: &str, body: &str) -> bool {
         })
         .unwrap_or(false);
     let app_id = if from_target {
-        Toast::POWERSHELL_APP_ID.to_string()
+        POWERSHELL_APP_ID.to_string()
     } else {
         app.config().identifier.clone()
     };
-    let handle = app.clone();
-    Toast::new(&app_id)
-        .title(title)
-        .text1(body)
-        .on_activated(move |_action| {
-            show_main(&handle);
-            Ok(())
-        })
-        .show()
-        .is_ok()
+    let shown = (|| -> windows::core::Result<()> {
+        let doc = XmlDocument::new()?;
+        doc.LoadXml(&HSTRING::from(toast_xml(title, body)))?;
+        let toast = ToastNotification::CreateToastNotification(&doc)?;
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(&app_id))?.Show(&toast)
+    })();
+    if let Err(e) = &shown {
+        trace(&format!("toast not shown: {e}"));
+    }
+    shown.is_ok()
+}
+
+/* The link a clicked toast opens, registered for this user and pointing at
+ * this copy of Hark. Written at every start, so it follows the app if it
+ * moves (a reinstall elsewhere, a test build). */
+#[cfg(windows)]
+const OPEN_LINK: &str = "hark-desktop:open";
+
+#[cfg(windows)]
+fn register_open_link() {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let written = (|| -> std::io::Result<()> {
+        let (scheme, _) =
+            RegKey::predef(HKEY_CURRENT_USER).create_subkey(r"Software\Classes\hark-desktop")?;
+        scheme.set_value("", &"URL:Hark Desktop")?;
+        scheme.set_value("URL Protocol", &"")?;
+        let (command, _) = scheme.create_subkey(r"shell\open\command")?;
+        command.set_value("", &format!("\"{}\" \"%1\"", exe.display()))
+    })();
+    if let Err(e) = written {
+        trace(&format!("open link not registered: {e}"));
+    }
+}
+
+#[cfg(not(windows))]
+fn register_open_link() {}
+
+/* The toast: a title line and a body line, as text; clicking it opens OPEN_LINK. */
+#[cfg(windows)]
+fn toast_xml(title: &str, body: &str) -> String {
+    let text = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
+    format!(
+        "<toast activationType=\"protocol\" launch=\"{OPEN_LINK}\"><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
+        text(title),
+        text(body)
+    )
 }
 
 #[cfg(not(windows))]
@@ -2876,10 +2931,16 @@ fn install_bridge_listeners(app: &AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let start_hidden = std::env::args().any(|a| a == "--minimized");
+    let context = tauri::generate_context!();
+    std::thread::spawn(register_open_link);
 
     tauri::Builder::default()
         // Single instance first: relaunching focuses the resident window.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            trace(&format!(
+                "second launch, {} argument(s)",
+                args.len().saturating_sub(1)
+            ));
             show_main(app);
         }))
         /* Without the plugin's own link catcher: it is put into every frame, so
@@ -3029,7 +3090,7 @@ pub fn run() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Hark Desktop")
         .run(|app, event| match event {
             tauri::RunEvent::WindowEvent {
@@ -3390,6 +3451,15 @@ mod tests {
         assert_eq!(plans.view(false).phase, "idle");
         plans.finished = Some(plan("Quick", 4, 4));
         assert_eq!(plans.view(false).phase, "done");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn toast_text_is_escaped() {
+        assert_eq!(
+            toast_xml("Hark", "Tom & Jerry <3 \"you\""),
+            "<toast activationType=\"protocol\" launch=\"hark-desktop:open\"><visual><binding template=\"ToastGeneric\"><text>Hark</text><text>Tom &amp; Jerry &lt;3 &quot;you&quot;</text></binding></visual></toast>"
+        );
     }
 
     #[cfg(windows)]

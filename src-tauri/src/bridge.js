@@ -363,6 +363,8 @@
         "}",
         "#hark-caption{position:fixed;top:14px;right:16px;z-index:2147483646;display:flex;gap:2px;padding:4px;border-radius:9999px;background:var(--thin-bg,rgba(255,255,255,.55));backdrop-filter:blur(16px) saturate(1.4);-webkit-backdrop-filter:blur(16px) saturate(1.4);box-shadow:inset 0 0 0 1px var(--stroke-secondary,rgba(29,29,31,.08)),0 4px 18px rgba(0,0,0,.08);font-family:'GT Standard L','Segoe UI Variable Text','Segoe UI',sans-serif}",
         "#hark-caption button{appearance:none;border:0;background:transparent;width:40px;height:40px;border-radius:9999px;display:grid;place-items:center;color:var(--text-primary,#1d1d1f);cursor:pointer;padding:0}",
+        /* Hark's sign-in page stretches every icon in a button to fill it. */
+        "#hark-caption svg{width:15px!important;height:15px!important;flex:none}",
         "#hark-caption button:hover{background:color-mix(in srgb,currentColor 9%,transparent)}",
         "#hark-caption button.hark-close:hover{background:#e81123;color:#fff}",
         "@media (forced-colors:active){#hark-caption,#hark-caption button{border:1px solid ButtonText}}"
@@ -691,7 +693,9 @@
    * count. It is reported as a plan with no steps ("live"), titled with the
    * request that started it, and done once the pill has gone from the chat. */
   var RUN_PILL = '[data-testid="live-run-pill"]';
-  var RUN_GONE_MS = 4000; /* a pill re-drawn between phases is not a finish */
+  /* A pill re-drawn between phases is not a finish: in a real run it vanished
+   * for 2 to 4 seconds mid-way. Hark's reply notifies at once anyway. */
+  var RUN_GONE_MS = 10000;
   function readRunNote() {
     var pill = document.querySelector(RUN_PILL);
     if (!pill) return null;
