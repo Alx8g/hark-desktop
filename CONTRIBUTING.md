@@ -31,6 +31,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org) for commit messa
 | `src-tauri/capabilities/` | What local pages and hark.com pages are allowed to call |
 | `src/`, `*.html` | The local pages (splash, settings, quick ask, offline), built with Vite |
 | `src-tauri/windows/` | Windows installer wording and art |
+| `src-setup/` | `Hark-Desktop-Setup.exe`, the Windows download: a small sky card that runs the standard installer out of sight |
 | `branding/` | Brand sources. `node branding/build.mjs` renders the installer art and the social banner |
 | `docs/` | The project website at harkdesk.top. Cloudflare Pages publishes this folder on every push to `main`; there is no build step. `_headers` and `_redirects` configure it. |
 
@@ -71,6 +72,15 @@ pnpm tauri icon src-tauri/icons/source.png
 ```
 
 That command also writes Android and iOS folders, which this desktop app does not use; delete `src-tauri/icons/android` and `src-tauri/icons/ios`.
+
+`Hark-Desktop-Setup.exe` (`src-setup/`) is the one-click Windows setup people download. It carries the NSIS `setup.exe` that `pnpm tauri build` makes and runs it with `/S`, so the install itself (files, Start menu, uninstall entry, notification link) is the standard one; updates keep using that `setup.exe` directly. Build it after `pnpm tauri build`, pointing it at the installer to carry:
+
+```
+$env:HARK_SETUP_PAYLOAD = "$PWD\src-tauri\target\release\bundle\nsis\Hark_<version>_x64-setup.exe"
+cargo build --release --manifest-path src-setup/Cargo.toml
+```
+
+Its card is `src-setup/ui/setup.html`. Set `HARK_SETUP_LOG=1` and redirect stderr to a file to see what it does. Without WebView2 it opens the standard installer instead, and `/S` skips the card.
 
 To try an installer without touching a real install, build it under a different identifier:
 
