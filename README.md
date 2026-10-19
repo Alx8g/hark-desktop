@@ -14,7 +14,7 @@ Download the build for your system from the [latest release](../../releases/late
 
 | System | File | Notes |
 | --- | --- | --- |
-| Windows 10 and 11 | `Hark_<version>_x64-setup.exe` | Per-user install, no admin rights needed. Tested on Windows 11; Windows 10 needs the WebView2 runtime, which the installer fetches if it is missing. The `.msi` installs for all users and needs admin rights. |
+| Windows 10 and 11 | `Hark-Desktop-Setup.exe` | One click, per-user install, no admin rights needed. Tested on Windows 11. It carries `Hark_<version>_x64-setup.exe`, the standard installer, and runs it out of sight; that file is attached too, and either installs silently with `/S`. If WebView2 is missing (some Windows 10 PCs), the setup opens the standard installer, which fetches it. The `.msi` installs for all users and needs admin rights. |
 | macOS 11 or newer | `.dmg` (Apple silicon or Intel) | Not signed. Open it with a right click, then Open, the first time. |
 | Linux | `.deb` or `.rpm` (about 3 MB), or `.AppImage` (about 78 MB) | The deb and rpm use your system's WebKitGTK 4.1. The AppImage carries its own, which is why it is larger. A tray icon needs AppIndicator support. |
 
@@ -64,7 +64,7 @@ Measured on Windows 11 (Intel i9-12900H, 32 GB, WebView2 155, signed-in account,
 
 | | |
 | --- | --- |
-| Installer size | about 2.3 MB (a typical Electron wrapper is 80 to 200 MB) |
+| Installer size | about 4.4 MB for `Hark-Desktop-Setup.exe`, 3.4 MB of it the standard installer it carries (a typical Electron wrapper is 80 to 200 MB) |
 | Loading screen visible | about 0.6 s after launch |
 | Hark shown | median 3.1 s: as soon as Hark's own interface has painted, without waiting for the rest of the page |
 | Visible and idle | about 15 to 25% of one core. hark.com draws its animated sky continuously while it is on screen. |

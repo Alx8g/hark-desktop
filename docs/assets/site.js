@@ -43,7 +43,7 @@
 
   // Match release files by extension. First match per system wins.
   var PATTERNS = {
-    windows: [/-setup\.exe$/i, /\.msi$/i],
+    windows: [/^Hark-Desktop-Setup\.exe$/i, /-setup\.exe$/i, /\.msi$/i],
     macos: [/\.dmg$/i],
     linux: [/\.appimage$/i, /\.deb$/i, /\.rpm$/i],
   };
