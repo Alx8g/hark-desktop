@@ -82,6 +82,8 @@ cargo build --release --manifest-path src-setup/Cargo.toml
 
 Its card is `src-setup/ui/setup.html`. Set `HARK_SETUP_LOG=1` and redirect stderr to a file to see what it does. Without WebView2 it opens the standard installer instead, and `/S` skips the card.
 
+A fix to the setup alone doesn't need a new Hark version: run the Rebuild setup workflow (Actions tab) with the release tag. It rebuilds `Hark-Desktop-Setup.exe` around that release's own `setup.exe` and replaces it on the release.
+
 To try an installer without touching a real install, build it under a different identifier:
 
 ```

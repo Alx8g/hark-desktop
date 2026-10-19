@@ -1,0 +1,41 @@
+name: Rebuild setup
+
+# Rebuilds Hark-Desktop-Setup.exe for a published release, around that release's own setup.exe, and replaces it on
+# the release. For fixes to the setup alone, which shouldn't make every installed copy update to an unchanged app.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, such as v0.2.10
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    name: Hark-Desktop-Setup.exe
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-setup
+      - name: Build around the release's setup.exe
+        shell: pwsh
+        run: |
+          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+$') { throw "Not a release tag: $env:TAG" }
+          $version = $env:TAG.Substring(1)
+          gh release download $env:TAG --pattern "Hark_${version}_x64-setup.exe" --dir payload
+          $env:HARK_SETUP_PAYLOAD = (Resolve-Path "payload/Hark_${version}_x64-setup.exe").Path
+          $env:HARK_SETUP_VERSION = $version
+          cargo build --release --manifest-path src-setup/Cargo.toml
+          New-Item -ItemType Directory -Force setup-out | Out-Null
+          Copy-Item src-setup/target/release/hark-setup.exe setup-out/Hark-Desktop-Setup.exe
+      - name: Replace Hark-Desktop-Setup.exe on the release
+        shell: pwsh
+        run: gh release upload $env:TAG setup-out/Hark-Desktop-Setup.exe --clobber
