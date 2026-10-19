@@ -61,6 +61,26 @@ pub fn main() {
     let Err(e) = card();
     log(&format!("no card ({e}): running the standard installer"));
     let _ = run_standard::<&str>(&[]);
+    remove_profile();
+}
+
+/// WebView2's profile for the card. It holds nothing worth keeping and grows to tens of megabytes, so the setup
+/// deletes it on the way out.
+fn profile_dir() -> PathBuf {
+    std::env::temp_dir().join("hark-desktop-setup")
+}
+
+/// WebView2's own processes let go of the profile a moment after the card closes; keep trying for a few seconds.
+fn remove_profile() {
+    let dir = profile_dir();
+    for _ in 0..40 {
+        if !dir.exists() || fs::remove_dir_all(&dir).is_ok() {
+            log("removed WebView2's profile");
+            return;
+        }
+        thread::sleep(Duration::from_millis(150));
+    }
+    log("WebView2's profile is still in use: left in Temp");
 }
 
 fn card() -> Result<std::convert::Infallible, Box<dyn std::error::Error>> {
@@ -90,7 +110,7 @@ fn card() -> Result<std::convert::Infallible, Box<dyn std::error::Error>> {
     }
 
     // WebView2 needs a folder for its profile. Left to itself it makes one next to this program, in Downloads.
-    let mut context = WebContext::new(Some(std::env::temp_dir().join("hark-desktop-setup")));
+    let mut context = WebContext::new(Some(profile_dir()));
     let from_page = proxy.clone();
     let webview = WebViewBuilder::new_with_web_context(&mut context)
         .with_html(PAGE)
@@ -102,6 +122,8 @@ fn card() -> Result<std::convert::Infallible, Box<dyn std::error::Error>> {
             let _ = from_page.send_event(Msg::Page(req.into_body()));
         })
         .build(&window)?;
+    // Held in an Option so the card can be closed before its profile is deleted (see LoopDestroyed).
+    let mut webview = Some(webview);
 
     // The card shows itself once its fonts are in; this is the backstop if that message never comes.
     let backstop = proxy.clone();
@@ -156,6 +178,12 @@ fn card() -> Result<std::convert::Infallible, Box<dyn std::error::Error>> {
                 event: WindowEvent::CloseRequested,
                 ..
             } if !busy => *flow = ControlFlow::Exit,
+            // The last event before the process ends: close the card out of sight, then tidy up after WebView2.
+            Event::LoopDestroyed => {
+                window.set_visible(false);
+                drop(webview.take());
+                remove_profile();
+            }
             _ => {}
         }
     })
@@ -168,8 +196,10 @@ fn show(window: &Window) {
     }
 }
 
-fn js(webview: &WebView, script: &str) {
-    let _ = webview.evaluate_script(script);
+fn js(webview: &Option<WebView>, script: &str) {
+    if let Some(webview) = webview {
+        let _ = webview.evaluate_script(script);
+    }
 }
 
 /// Runs the standard installer silently, easing the bar along while it works, then checks the install is really
