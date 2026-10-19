@@ -50,6 +50,9 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update packages (latest.json); the public key is in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tauriScript: pnpm tauri
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
@@ -59,7 +62,10 @@ jobs:
             on Windows choose More info, then Run anyway; on macOS open the app with a right click, then Open.
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          # Update packages and latest.json only here, so builds without the key still work.
+          args: ${{ matrix.args }} --config src-tauri/tauri.updater.conf.json
+          # Updates use the per-user setup.exe, the installer people download.
+          updaterJsonPreferNsis: true
       - name: Keep the packages from a manual run
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7

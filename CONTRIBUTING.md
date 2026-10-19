@@ -82,6 +82,8 @@ pnpm tauri build --bundles nsis --config '{"identifier":"com.example.installtest
 
 Maintainers push a tag such as `v0.2.0`. The release workflow builds Windows, macOS (Apple silicon and Intel) and Linux packages and attaches them to a draft GitHub release. Bump `version` in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` first; they must match.
 
+Installed copies update themselves from the latest published release. The workflow signs the update packages with the `TAURI_SIGNING_PRIVATE_KEY` repository secret and attaches `latest.json`; the matching public key is `plugins.updater.pubkey` in `tauri.conf.json`. Update packages are only made in the release workflow (`--config src-tauri/tauri.updater.conf.json`), so local builds need no key. A draft release is not seen by the app until it is published as the latest release. If the key is ever replaced, copies already installed can no longer update and need a manual install once.
+
 ## Testing on macOS and Linux
 
 The maintainers develop on Windows. If you run Hark Desktop on macOS or Linux, reports and fixes are especially welcome: say which system, desktop environment and version you use.

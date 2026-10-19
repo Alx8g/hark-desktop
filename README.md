@@ -31,6 +31,7 @@ First launch opens hark.com so you can sign in. After that you stay signed in, a
 - **Quick ask from anywhere.** `Ctrl+Shift+H` (`Cmd+Shift+H` on macOS) opens a little piece of Hark's sky with a message bar, near the top of the screen you're on. Enter sends it to Hark and brings Hark forward on the reply. To check it first, turn off Send from quick ask in Settings and Enter drafts it in Hark instead. Esc or a click elsewhere closes it, and what you typed is still there next time.
 - **Opens where you left it.** While hark.com loads, the window shows Hark's own sky brightening from dawn, then Hark fades in. If loading is slow or you're offline, it says so and offers Try again.
 - **Looks like your Hark.** The app's own screens follow Hark's light or dark theme and use the sky Hark is showing, which changes with the time of day. The plan island stays out of the way while something runs full screen.
+- **Updates itself.** Hark Desktop checks for a new version when it starts and every six hours, downloads it in the background, then asks: a notification and a tray item, "Restart to update". It never restarts on its own. Updates are signed, and the app refuses one that isn't. From 0.2.9 on; the deb and rpm packages are the exception.
 - **Starts with your session, hidden,** so Hark's replies can find you. On Windows this is on by default; on macOS and Linux it is opt-in. Every behaviour is switchable in Desktop settings (`Ctrl+,`).
 - **Sign-in screen that is only the sign-in.** Hark's signed-out page is a long marketing page. The desktop app shows just the sign-in, with no scrolling.
 - **Links stay sensible.** Hark and the Google, Apple, Stripe and Cloudflare pages its sign-in and payments use open in the app. Everything else opens in your default browser. Downloads go to your Downloads folder with a notification and never overwrite a file; programs and installers open in your browser instead, so its download checks apply.
@@ -101,7 +102,7 @@ Release builds use `lto = true` and `codegen-units = 1` to keep the binary small
 - While you drag a window edge on a heavy page, the strip the page has not repainted yet is briefly see-through.
 - Google and Apple sign-in run as an in-window redirect rather than a popup, which matches Hark's web flow.
 - Notifications depend on Hark's current page structure. The app only notifies for a message it positively recognises as Hark's. If Hark restyles its chat, notifications can go quiet, but your own messages will not be announced.
-- There is no auto-updater yet. Download a new release to update.
+- The deb and rpm packages do not update themselves. Download a new release, or use the AppImage, which does.
 - Builds are not code-signed or notarised.
 
 ## Licence

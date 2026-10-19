@@ -408,6 +408,7 @@ pub struct AppState {
     plans: Mutex<Plans>,
     island_rect: Mutex<IslandRect>,
     tray_menu: Mutex<Option<TrayMenu>>,
+    pending_update: Mutex<Option<PendingUpdate>>,
     appearance: Mutex<Appearance>,
     notified: Mutex<Vec<Instant>>,
     /* One worker brings the island and tray up to date (refresh_plans_soon). */
@@ -646,6 +647,14 @@ struct TrayMenu {
     plan: MenuItem<Wry>,
     plan_gap: PredefinedMenuItem<Wry>,
     plan_shown: bool,
+    update: MenuItem<Wry>,
+    update_shown: bool,
+}
+
+/* A newer Hark Desktop, downloaded and waiting for the go-ahead to install. */
+struct PendingUpdate {
+    update: tauri_plugin_updater::Update,
+    bytes: Vec<u8>,
 }
 
 fn load_settings(app: &AppHandle) -> Settings {
@@ -883,6 +892,123 @@ fn island_dismiss(app: AppHandle) {
     refresh_plans_soon(&app);
 }
 
+/* -------------------------------- updates -------------------------------- */
+
+/* New versions come from the latest GitHub release (latest.json, signed with
+ * the project's key; the public half is in tauri.conf.json). Hark checks a
+ * minute after it starts and every six hours, downloads a newer version
+ * quietly, then offers it: a notification and a tray item, "Restart to update
+ * to x.y.z". It never restarts on its own. Installing runs the new installer
+ * with a progress bar only, and Hark comes back the way it was started (in
+ * the tray at sign-in). Not in development builds, and on Linux only for the
+ * AppImage (deb and rpm update through the system). */
+fn updates_supported() -> bool {
+    if cfg!(debug_assertions) {
+        return false;
+    }
+    if cfg!(target_os = "linux") {
+        return std::env::var_os("APPIMAGE").is_some();
+    }
+    true
+}
+
+fn start_update_checks(app: &AppHandle) {
+    if !updates_supported() {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(60));
+        loop {
+            tauri::async_runtime::block_on(check_for_update(&app));
+            std::thread::sleep(Duration::from_secs(6 * 60 * 60));
+        }
+    });
+}
+
+async fn check_for_update(app: &AppHandle) {
+    use tauri_plugin_updater::UpdaterExt;
+    let state = app.state::<AppState>();
+    if state
+        .pending_update
+        .lock()
+        .map(|p| p.is_some())
+        .unwrap_or(true)
+    {
+        return;
+    }
+    let updater = match app.updater() {
+        Ok(updater) => updater,
+        Err(e) => {
+            trace(&format!("updater unavailable: {e}"));
+            return;
+        }
+    };
+    let update = match updater.check().await {
+        Ok(Some(update)) => update,
+        Ok(None) => {
+            trace("no update");
+            return;
+        }
+        Err(e) => {
+            trace(&format!("update check failed: {e}"));
+            return;
+        }
+    };
+    let version = update.version.clone();
+    trace(&format!("update {version} found, downloading"));
+    let bytes = match update.download(|_, _| {}, || {}).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            trace(&format!("update download failed: {e}"));
+            return;
+        }
+    };
+    if let Ok(mut pending) = state.pending_update.lock() {
+        *pending = Some(PendingUpdate { update, bytes });
+    }
+    refresh_plans_soon(app);
+    notify_linked(
+        app,
+        "Hark Desktop",
+        &format!("Version {version} is ready. Click to restart Hark and update."),
+        false,
+        UPDATE_LINK,
+    );
+}
+
+/* "Restart to update": install the downloaded version. On Windows the
+ * installer takes over and this process ends; elsewhere Hark restarts. */
+fn install_update(app: &AppHandle) {
+    let Some(pending) = app
+        .state::<AppState>()
+        .pending_update
+        .lock()
+        .ok()
+        .and_then(|mut p| p.take())
+    else {
+        show_main(app);
+        return;
+    };
+    trace(&format!("installing update {}", pending.update.version));
+    // Past the close-to-tray guard: this exit is meant.
+    let quitting = &app.state::<AppState>().quitting;
+    quitting.store(true, Ordering::SeqCst);
+    match pending.update.install(&pending.bytes) {
+        Ok(()) => app.restart(),
+        Err(e) => {
+            quitting.store(false, Ordering::SeqCst);
+            trace(&format!("update install failed: {e}"));
+            notify(
+                app,
+                "Hark Desktop",
+                "The update could not be installed. Download it from harkdesk.top instead.",
+                true,
+            );
+        }
+    }
+}
+
 /* ---------------------------- native helpers ---------------------------- */
 
 /* Windows: the notification plugin's toast does nothing when clicked, and
@@ -896,7 +1022,7 @@ fn island_dismiss(app: AppHandle) {
  * carries it), or PowerShell for a build run from a target folder.
  * False if it could not be shown. */
 #[cfg(windows)]
-fn show_clickable_toast(app: &AppHandle, title: &str, body: &str) -> bool {
+fn show_clickable_toast(app: &AppHandle, title: &str, body: &str, link: &str) -> bool {
     use windows::core::HSTRING;
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
@@ -917,7 +1043,7 @@ fn show_clickable_toast(app: &AppHandle, title: &str, body: &str) -> bool {
     };
     let shown = (|| -> windows::core::Result<()> {
         let doc = XmlDocument::new()?;
-        doc.LoadXml(&HSTRING::from(toast_xml(title, body)))?;
+        doc.LoadXml(&HSTRING::from(toast_xml(title, body, link)))?;
         let toast = ToastNotification::CreateToastNotification(&doc)?;
         ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(&app_id))?.Show(&toast)
     })();
@@ -927,11 +1053,12 @@ fn show_clickable_toast(app: &AppHandle, title: &str, body: &str) -> bool {
     shown.is_ok()
 }
 
-/* The link a clicked toast opens, registered for this user and pointing at
- * this copy of Hark. Written at every start, so it follows the app if it
- * moves (a reinstall elsewhere, a test build). */
-#[cfg(windows)]
+/* The links a clicked toast opens (hark-desktop:...), registered for this
+ * user and pointing at this copy of Hark. Written at every start, so it
+ * follows the app if it moves (a reinstall elsewhere, a test build). The
+ * second launch they cause is handled in the single-instance callback. */
 const OPEN_LINK: &str = "hark-desktop:open";
+const UPDATE_LINK: &str = "hark-desktop:update";
 
 #[cfg(windows)]
 fn register_open_link() {
@@ -956,9 +1083,9 @@ fn register_open_link() {
 #[cfg(not(windows))]
 fn register_open_link() {}
 
-/* The toast: a title line and a body line, as text; clicking it opens OPEN_LINK. */
+/* The toast: a title line and a body line, as text; clicking it opens `link`. */
 #[cfg(windows)]
-fn toast_xml(title: &str, body: &str) -> String {
+fn toast_xml(title: &str, body: &str, link: &str) -> String {
     let text = |s: &str| {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")
@@ -966,23 +1093,30 @@ fn toast_xml(title: &str, body: &str) -> String {
             .replace('"', "&quot;")
     };
     format!(
-        "<toast activationType=\"protocol\" launch=\"{OPEN_LINK}\"><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
+        "<toast activationType=\"protocol\" launch=\"{}\"><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
+        text(link),
         text(title),
         text(body)
     )
 }
 
 #[cfg(not(windows))]
-fn show_clickable_toast(_app: &AppHandle, _title: &str, _body: &str) -> bool {
+fn show_clickable_toast(_app: &AppHandle, _title: &str, _body: &str, _link: &str) -> bool {
     false
 }
 
 fn notify(app: &AppHandle, title: &str, body: &str, force: bool) {
+    notify_linked(app, title, body, force, OPEN_LINK);
+}
+
+/* A notification that opens `link` when clicked (Windows; elsewhere a click
+ * brings the app forward as usual). */
+fn notify_linked(app: &AppHandle, title: &str, body: &str, force: bool, link: &str) {
     if !force && !settings_snapshot(app).notifications {
         return;
     }
     trace(&format!("notify ({} chars)", body.chars().count()));
-    if !show_clickable_toast(app, title, body) {
+    if !show_clickable_toast(app, title, body, link) {
         let _ = app.notification().builder().title(title).body(body).show();
     }
     if let Some(main) = app.get_webview_window("main") {
@@ -2221,6 +2355,7 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
         _ => {}
     });
     start_refresh_worker(app);
+    start_update_checks(app);
     Ok(())
 }
 
@@ -2331,7 +2466,9 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit Hark", true, None::<&str>)?;
-    /* The running plan is inserted after the first separator (see update_tray). */
+    let update = MenuItem::with_id(app, "update", "Restart to update", true, None::<&str>)?;
+    /* The running plan is inserted after the first separator, and a waiting
+     * update just above Quit (see update_tray). */
     let menu = Menu::with_items(
         app,
         &[
@@ -2376,6 +2513,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "browser" => {
                 let _ = app.opener().open_url(HARK_URL, None::<&str>);
             }
+            "update" => install_update(app),
             "quit" => quit(app),
             _ => {}
         })
@@ -2404,6 +2542,8 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             plan,
             plan_gap,
             plan_shown: false,
+            update,
+            update_shown: false,
         });
     }
     Ok(())
@@ -2570,8 +2710,13 @@ fn update_tray(app: &AppHandle) {
     } else {
         PlanView::idle()
     };
+    let update_version = state
+        .pending_update
+        .lock()
+        .ok()
+        .and_then(|p| p.as_ref().map(|u| u.update.version.clone()));
     let key = format!(
-        "{}|{}|{}|{}|{unread}",
+        "{}|{}|{}|{}|{unread}|{update_version:?}",
         plan.phase, plan.title, plan.done, plan.total
     );
     if let Ok(mut last) = state.tray_key.lock() {
@@ -2606,7 +2751,7 @@ fn update_tray(app: &AppHandle) {
         let _ = main.set_badge_count(if unread > 0 { Some(unread) } else { None });
     }
     // Take what is needed out of the lock: each menu change waits on the main thread.
-    let (menu, open, plan_item, plan_gap, shown) = {
+    let (menu, open, plan_item, plan_gap, shown, update_item, update_shown) = {
         let Ok(slot) = state.tray_menu.lock() else {
             return;
         };
@@ -2619,8 +2764,29 @@ fn update_tray(app: &AppHandle) {
             t.plan.clone(),
             t.plan_gap.clone(),
             t.plan_shown,
+            t.update.clone(),
+            t.update_shown,
         )
     };
+    // A downloaded update: "Restart to update to x.y.z", just above Quit.
+    if let Some(version) = &update_version {
+        let _ = update_item.set_text(format!("Restart to update to {version}"));
+    }
+    if update_version.is_some() != update_shown {
+        let changed = if update_version.is_some() {
+            let before_quit = menu.items().map(|i| i.len().saturating_sub(1)).unwrap_or(0);
+            menu.insert(&update_item, before_quit)
+        } else {
+            menu.remove(&update_item)
+        };
+        if changed.is_ok() {
+            if let Ok(mut slot) = state.tray_menu.lock() {
+                if let Some(t) = slot.as_mut() {
+                    t.update_shown = update_version.is_some();
+                }
+            }
+        }
+    }
     let _ = open.set_text(if unread > 0 {
         format!("Open Hark ({unread} unread)")
     } else {
@@ -2941,8 +3107,13 @@ pub fn run() {
                 "second launch, {} argument(s)",
                 args.len().saturating_sub(1)
             ));
-            show_main(app);
+            if args.iter().any(|a| a.trim_end_matches('/') == UPDATE_LINK) {
+                install_update(app);
+            } else {
+                show_main(app);
+            }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         /* Without the plugin's own link catcher: it is put into every frame, so
          * in a page Hark built (a hark.site frame) it caught each "new window"
          * link and asked the app to open it, which a frame may not, and the link
@@ -3004,6 +3175,7 @@ pub fn run() {
             plans: Mutex::new(Plans::default()),
             island_rect: Mutex::new(IslandRect::default()),
             tray_menu: Mutex::new(None),
+            pending_update: Mutex::new(None),
             appearance: Mutex::new(Appearance::default()),
             notified: Mutex::new(Vec::new()),
             refresh: (Mutex::new(false), Condvar::new()),
@@ -3457,9 +3629,11 @@ mod tests {
     #[test]
     fn toast_text_is_escaped() {
         assert_eq!(
-            toast_xml("Hark", "Tom & Jerry <3 \"you\""),
+            toast_xml("Hark", "Tom & Jerry <3 \"you\"", OPEN_LINK),
             "<toast activationType=\"protocol\" launch=\"hark-desktop:open\"><visual><binding template=\"ToastGeneric\"><text>Hark</text><text>Tom &amp; Jerry &lt;3 &quot;you&quot;</text></binding></visual></toast>"
         );
+        assert!(toast_xml("Hark Desktop", "Ready", UPDATE_LINK)
+            .starts_with("<toast activationType=\"protocol\" launch=\"hark-desktop:update\">"));
     }
 
     #[cfg(windows)]
