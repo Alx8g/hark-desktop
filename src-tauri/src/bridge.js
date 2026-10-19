@@ -544,14 +544,52 @@
 
   function installMessages(emit) {
     var seen = new Set();
+    /* Messages known to be history, not new: what Hark draws while the chat
+     * settles, and anything drawn above one of those. */
+    var history = new Set();
     var unread = 0;
     var lastSentText = "";
     var pendingToasts = [];
     var toastTimer = null;
 
+    /* Hark draws the chat after this script starts, and again whenever the
+     * chat comes back (from Projects, say), a few messages at a time. All of
+     * that is history: until the list has been quiet for 3 seconds (20 at
+     * most), what it draws is only noted. Without this, Hark started in the
+     * tray at sign-in announced old replies as new ("+17 more"). */
+    var list = null;
+    var settleQuiet = 0;
+    var settleCap = 0;
+    function settling(now) {
+      var l = document.querySelector('[data-testid="message-list"]');
+      if (l !== list) {
+        list = l;
+        settleQuiet = now + 3000;
+        settleCap = now + 20000;
+      }
+      return now < settleQuiet && now < settleCap;
+    }
+    function noteHistory(id, drawing) {
+      seen.add(id);
+      history.add(id);
+      if (drawing) settleQuiet = Math.max(settleQuiet, Date.now() + 3000);
+    }
+    /* A new message arrives after every message already there; one drawn
+     * above a known one is older history being loaded. */
+    function belowHistory(bubble) {
+      var all = document.querySelectorAll('[data-testid="message-bubble"][data-bubble-id]');
+      var past = false;
+      for (var i = 0; i < all.length; i++) {
+        if (all[i] === bubble) { past = true; continue; }
+        if (past && history.has(all[i].getAttribute("data-bubble-id"))) return true;
+      }
+      return false;
+    }
+
     function seed() {
+      settling(Date.now());
       document.querySelectorAll('[data-testid="message-bubble"][data-bubble-id]').forEach(function (b) {
-        seen.add(b.getAttribute("data-bubble-id"));
+        noteHistory(b.getAttribute("data-bubble-id"), false);
       });
     }
     seed();
@@ -593,10 +631,12 @@
     function onNewBubble(bubble) {
       var id = bubble.getAttribute("data-bubble-id");
       if (!id || seen.has(id)) return;
+      if (settling(Date.now())) { noteHistory(id, true); return; }
+      if (belowHistory(bubble)) { noteHistory(id, false); return; }
       seen.add(id);
       if (seen.size > 600) { /* keep memory bounded on very long threads */
-        var keep = Array.from(seen).slice(-300);
-        seen = new Set(keep);
+        seen = new Set(Array.from(seen).slice(-300));
+        history = new Set(Array.from(history).slice(-300));
       }
       /* A reply's bubble can appear before its words stream in: look again for a while. */
       var tries = 0;
