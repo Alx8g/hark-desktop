@@ -89,7 +89,7 @@
         "https://github.com/Alx8g/hark-desktop/releases/latest/download/latest.json"
       ],
       "windows": {
-        "installMode": "passive"
+        "installMode": "quiet"
       }
     }
   }
