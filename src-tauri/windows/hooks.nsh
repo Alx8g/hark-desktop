@@ -9,3 +9,12 @@
 !define MUI_FINISHPAGE_TITLE "Hark is ready"
 !define MUI_FINISHPAGE_TEXT "Hark will wait in your tray and open when you need it. Press Ctrl+Shift+H any time to ask something quickly.$\r$\n$\r$\nClick Finish to close this window."
 !define MUI_FINISHPAGE_RUN_TEXT "Open Hark now"
+
+; Uninstalling removes the hark-desktop: link Hark registers (at each start) so
+; that clicking one of its notifications brings it up. Not when an update runs
+; the uninstaller: the link stays for the new version.
+!macro NSIS_HOOK_POSTUNINSTALL
+  ${If} $UpdateMode <> 1
+    DeleteRegKey HKCU "Software\Classes\hark-desktop"
+  ${EndIf}
+!macroend
