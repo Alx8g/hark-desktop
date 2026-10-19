@@ -426,6 +426,8 @@ pub struct AppState {
     last_page: Mutex<Option<Url>>,
     /* What Hark's page was last told about being seen (sync_shell), -1 at first. */
     shell_key: AtomicI64,
+    /* When Hark last lost focus to Windows' own taskbar or tray (see toggle_main). */
+    main_left_for_shell: Mutex<Option<Instant>>,
 }
 
 /* Where the island window is, in the same units as the pointer: physical
@@ -883,11 +885,51 @@ fn island_dismiss(app: AppHandle) {
 
 /* ---------------------------- native helpers ---------------------------- */
 
+/* Windows: the notification plugin's toast does nothing when clicked, so the
+ * same toast is shown here with a click handler that brings Hark up. It
+ * names the app the way the plugin does: by the installed app's id (its
+ * Start menu entry carries it), or as PowerShell for a build run from a
+ * target folder, which has no entry. False if it could not be shown. */
+#[cfg(windows)]
+fn show_clickable_toast(app: &AppHandle, title: &str, body: &str) -> bool {
+    use tauri_winrt_notification::Toast;
+    let from_target = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            exe.parent()
+                .map(|dir| dir.ends_with("target/debug") || dir.ends_with("target/release"))
+        })
+        .unwrap_or(false);
+    let app_id = if from_target {
+        Toast::POWERSHELL_APP_ID.to_string()
+    } else {
+        app.config().identifier.clone()
+    };
+    let handle = app.clone();
+    Toast::new(&app_id)
+        .title(title)
+        .text1(body)
+        .on_activated(move |_action| {
+            show_main(&handle);
+            Ok(())
+        })
+        .show()
+        .is_ok()
+}
+
+#[cfg(not(windows))]
+fn show_clickable_toast(_app: &AppHandle, _title: &str, _body: &str) -> bool {
+    false
+}
+
 fn notify(app: &AppHandle, title: &str, body: &str, force: bool) {
     if !force && !settings_snapshot(app).notifications {
         return;
     }
-    let _ = app.notification().builder().title(title).body(body).show();
+    trace(&format!("notify ({} chars)", body.chars().count()));
+    if !show_clickable_toast(app, title, body) {
+        let _ = app.notification().builder().title(title).body(body).show();
+    }
     if let Some(main) = app.get_webview_window("main") {
         let focused = main.is_focused().unwrap_or(false);
         let visible = main.is_visible().unwrap_or(false);
@@ -999,11 +1041,24 @@ fn hide_to_tray(app: &AppHandle, main: &WebviewWindow) {
     notify(app, "Hark is still running", body, true);
 }
 
+/* The tray icon's left click: hide Hark if it is in front, else show it.
+ * The click itself takes focus from Hark first (to the taskbar, or to the
+ * hidden-icons flyout opened on the way), so Hark having lost focus to the
+ * shell moments ago still counts as in front. Lost to another app, Hark was
+ * behind it and is shown. */
 fn toggle_main(app: &AppHandle) {
     if let Some(main) = app.get_webview_window("main") {
         let visible = main.is_visible().unwrap_or(false);
         let focused = main.is_focused().unwrap_or(false);
-        if visible && focused {
+        let left_for_shell = app
+            .state::<AppState>()
+            .main_left_for_shell
+            .lock()
+            .ok()
+            .and_then(|t| *t)
+            .map(|t| t.elapsed() < Duration::from_secs(8))
+            .unwrap_or(false);
+        if visible && (focused || left_for_shell) {
             let _ = main.hide();
             sync_shell(app, false);
         } else {
@@ -1242,6 +1297,36 @@ fn screen_busy() -> bool {
 #[cfg(not(windows))]
 fn screen_busy() -> bool {
     false
+}
+
+/* Windows' own taskbar or tray is in front (it has just taken focus). */
+#[cfg(windows)]
+fn shell_in_front() -> bool {
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetForegroundWindow() -> isize;
+        fn GetClassNameW(hwnd: isize, name: *mut u16, max: i32) -> i32;
+    }
+    let mut buf = [0u16; 128];
+    let len = unsafe { GetClassNameW(GetForegroundWindow(), buf.as_mut_ptr(), buf.len() as i32) };
+    is_shell_class(&String::from_utf16_lossy(&buf[..len.max(0) as usize]))
+}
+
+#[cfg(not(windows))]
+fn shell_in_front() -> bool {
+    false
+}
+
+/* The taskbar on each screen, and the hidden-icons flyout (old and new). */
+#[cfg(windows)]
+fn is_shell_class(class: &str) -> bool {
+    matches!(
+        class,
+        "Shell_TrayWnd"
+            | "Shell_SecondaryTrayWnd"
+            | "NotifyIconOverflowWindow"
+            | "TopLevelWindowForOverflowXamlIsland"
+    )
 }
 
 fn open_plan(app: &AppHandle, title: String) {
@@ -2066,6 +2151,9 @@ fn build_main_window(app: &AppHandle) -> tauri::Result<()> {
                 .map(|m| m.is_visible().unwrap_or(false) && !m.is_minimized().unwrap_or(false))
                 .unwrap_or(false);
             sync_shell(&focus_app, false);
+            if let Ok(mut left) = focus_app.state::<AppState>().main_left_for_shell.lock() {
+                *left = (!*focused && on_screen && shell_in_front()).then(Instant::now);
+            }
             if *focused && on_screen {
                 if let Ok(mut plans) = focus_app.state::<AppState>().plans.lock() {
                     plans.finished = None;
@@ -2865,6 +2953,7 @@ pub fn run() {
             last_progress: Mutex::new((None, false)),
             last_page: Mutex::new(None),
             shell_key: AtomicI64::new(-1),
+            main_left_for_shell: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             get_settings,
@@ -3301,6 +3390,26 @@ mod tests {
         assert_eq!(plans.view(false).phase, "idle");
         plans.finished = Some(plan("Quick", 4, 4));
         assert_eq!(plans.view(false).phase, "done");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_the_taskbar_and_tray_count_as_the_tray_click_taking_focus() {
+        for shell in [
+            "Shell_TrayWnd",
+            "Shell_SecondaryTrayWnd",
+            "TopLevelWindowForOverflowXamlIsland",
+        ] {
+            assert!(is_shell_class(shell), "{shell}");
+        }
+        for other in [
+            "Chrome_WidgetWin_1",
+            "Tauri Window",
+            "CASCADIA_HOSTING_WINDOW_CLASS",
+            "",
+        ] {
+            assert!(!is_shell_class(other), "{other}");
+        }
     }
 
     #[test]
